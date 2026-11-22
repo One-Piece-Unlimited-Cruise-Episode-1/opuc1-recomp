@@ -28,7 +28,6 @@ struct RegionRequest {
 struct FaultCounters {
     uint32_t mmio = 0;      // MMIO access that reached the handler
     uint32_t efb = 0;       // deferred (EFB) read materialized from a trap
-    uint32_t xguard = 0;    // executable-page write trap
     uint32_t unmapped = 0;  // guest touches that landed outside every mapped region
     uint32_t unmappedRegions = 0;  // distinct 64 KiB blocks committed on demand
 };
@@ -51,11 +50,6 @@ uint8_t* HostPointer(uint32_t guestAddress);
 // guest view so a flat read traps and materializes the copy.
 void ProtectDeferredRange(uint32_t address, size_t length);
 void UnprotectDeferredRange(uint32_t address, size_t length);
-
-// Executable-write guard: pages fully covered by a registered executable range
-// become PAGE_READONLY in the guest view. Registration order does not matter -
-// ranges registered before the mapping exists are re-applied by Initialize.
-void RegisterExecutableRange(uint32_t start, uint32_t end);
 
 FaultCounters Counters();
 

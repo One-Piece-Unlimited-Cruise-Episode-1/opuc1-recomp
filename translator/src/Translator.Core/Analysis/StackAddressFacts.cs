@@ -21,13 +21,7 @@ internal sealed class StackAddressFacts
     public static StackAddressFacts Empty { get; } =
         new(new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
 
-    /// <param name="trustRegisterCopies">
-    /// False for a body that can be resumed at any instruction: a copy into a
-    /// guest GPR (mr r4,r1) belongs to an earlier instruction a resume can skip.
-    /// Lowering temporaries live inside one instruction and r1 stays the stack
-    /// pointer, so those still resolve.
-    /// </param>
-    public static StackAddressFacts Build(IrFunction function, bool trustRegisterCopies = true)
+    public static StackAddressFacts Build(IrFunction function)
     {
         var temporaryOffsets = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var block in function.Blocks)
@@ -39,13 +33,11 @@ internal sealed class StackAddressFacts
                     // SSA form makes an architectural register destination as stable as a compiler
                     // temporary (e.g. PPC prologues copying r1 to r11 for the save area).
                     case IrAssign assign when
-                        (trustRegisterCopies || !IsGuestGpr(assign.Destination)) &&
                         TryResolveValue(assign.Value, temporaryOffsets, out var assignOffset):
                         temporaryOffsets[assign.Destination] = assignOffset;
                         break;
 
                     case IrBinary binary when
-                        (trustRegisterCopies || !IsGuestGpr(binary.Destination)) &&
                         TryResolveBinary(binary, temporaryOffsets, out var binaryOffset):
                         temporaryOffsets[binary.Destination] = binaryOffset;
                         break;
@@ -175,15 +167,6 @@ internal sealed class StackAddressFacts
             default:
                 return false;
         }
-    }
-
-    private static bool IsGuestGpr(string name)
-    {
-        var baseName = GetRegisterBaseName(name);
-        return baseName.Length > 1 &&
-               (baseName[0] == 'r' || baseName[0] == 'R') &&
-               int.TryParse(baseName.AsSpan(1), out var index) &&
-               index is >= 0 and < 32;
     }
 
     private static string GetRegisterBaseName(string name)

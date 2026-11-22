@@ -12,14 +12,6 @@
 #include <string_view>
 
 // Link with memory.cpp and the platform's real guest_flat_memory implementation.
-namespace RecompMod {
-std::atomic<bool> g_executableWriteGuardEnabled{false};
-std::atomic<uint8_t> g_executableWriteGuardPages[kExecutableWriteGuardPageCount]{};
-std::atomic<uint8_t> g_executableWriteGuardCoarsePages[kExecutableWriteGuardCoarsePageCount]{};
-std::atomic<uint8_t> g_executableWriteGuardMidPages[kExecutableWriteGuardMidPageCount]{};
-uint32_t CurrentTranslatedExecutionAddress() noexcept { return 0; }
-bool HandleExecutableWrite(uint32_t, size_t, uint64_t) { return false; }
-}
 
 void SystemBridge::DumpCpuState(const CpuContext*) {}
 void ShowRuntimeFatalPopup(std::string_view, std::string_view) noexcept { std::abort(); }
@@ -160,23 +152,11 @@ void TestWritableRanges() {
             "small mapping offset beyond limit passed");
     Require(!MemoryInline::TryGetWritablePointerFast(UINT32_MAX, 2, pointer),
             "writable range wrapped the guest address");
-    const uint32_t executable = 0x80004000u;
-    RecompMod::g_executableWriteGuardPages[executable >> 12].store(1);
-    RecompMod::g_executableWriteGuardCoarsePages[executable >> 20].store(1);
-    Memory::RefreshWritableFastPathsForExecutableRanges();
-    Require(MemoryInline::g_sparseWritablePageTables[executable >> 20] != nullptr,
-            "test did not reach sparse writable lookup");
-    Require(MemoryInline::TryGetWritablePointerFast(executable - 8, 8, pointer),
-            "sparse writable exact endpoint failed");
-    Require(!MemoryInline::TryGetWritablePointerFast(executable - 1, 2, pointer),
-            "sparse writable range crossed an executable page");
-    Require(!MemoryInline::TryGetWritablePointerFast(executable, 1, pointer),
-            "sparse writable range entered an executable page");
-    Require(!MemoryInline::TryGetWritablePointerFast(executable - 1, SIZE_MAX, pointer),
-            "sparse writable lookup accepted an overflowing length");
-    RecompMod::g_executableWriteGuardPages[executable >> 12].store(0);
-    RecompMod::g_executableWriteGuardCoarsePages[executable >> 20].store(0);
-    Memory::RefreshWritableFastPathsForExecutableRanges();
+    const uint32_t mem1 = 0x80004000u;
+    Require(MemoryInline::TryGetWritablePointerFast(mem1 - 8, 8, pointer),
+            "MEM1 writable lookup failed");
+    Require(!MemoryInline::TryGetWritablePointerFast(mem1 - 1, SIZE_MAX, pointer),
+            "writable lookup accepted an overflowing length");
 }
 
 bool CountRead(void* user) {

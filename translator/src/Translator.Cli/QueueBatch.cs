@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// Small FIFO primitive shared by the recursive and mod wave schedulers.
+/// Small FIFO primitive used by the recursive translation wave scheduler.
 /// Traversal-specific policy (depth, visited sets, retries, and failure
 /// handling) intentionally remains with each caller.
 /// </summary>

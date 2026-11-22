@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <string>
 
-// Host implementation of Dolphin's /dev/dolphin Discord contract. The guest
-// sends only strings and big-endian integer fields; the IPC wire protocol is
-// owned here so translated game code never needs host SDK headers.
+// Discord Rich Presence over the local Discord IPC socket/pipe. The runtime sets a basic presence at startup
+// (Initialize). SetClient / SetActivity / Reset were driven by Dolphin's /dev/dolphin device, which OPUC never
+// opens; they currently have no caller.
 namespace DiscordPresence {
 
 struct Activity {

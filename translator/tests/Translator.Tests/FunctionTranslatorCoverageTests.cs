@@ -32,7 +32,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, 4),
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, 4),
-            default,
             "discovery-only");
 
         var discovery = new FunctionTranslator(image).Discover(
@@ -59,7 +58,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(0x80001000, 0x1004),
             AddressRange.FromStartAndSize(0x80001000, 0x1004),
-            default,
             "test");
         var discovery = new FunctionTranslator(image).Discover(
             0x80001000,
@@ -91,7 +89,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(0x80001000, 0x1004),
             AddressRange.FromStartAndSize(0x80001000, 0x1004),
-            default,
             "test");
         // Leaf inlining would otherwise splice the trivial (blr-only) 0x80002000
         // callee straight into the caller, eliding the direct-call boundary this
@@ -127,7 +124,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(0x80001000, 0x28),
             AddressRange.FromStartAndSize(0x80001000, 0x28),
-            default,
             "test");
         // Leaf inlining would otherwise treat this unconditional branch to a
         // known sibling entry as an inlinable leaf; isolate the tail-call
@@ -235,7 +231,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(0x80001000, 0xC),
             AddressRange.FromStartAndSize(0x80001000, 0xC),
-            default,
             "test");
         var result = new FunctionTranslator(image).Translate(
             0x80001000,
@@ -265,7 +260,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(0x80001000, 0x1C),
             AddressRange.FromStartAndSize(0x80001000, 0x1C),
-            default,
             "test");
         var result = new FunctionTranslator(image).Translate(
             0x80001000,
@@ -329,7 +323,6 @@ public class FunctionTranslatorCoverageTests
             memory,
             AddressRange.FromStartAndSize(0x80001000, 0x8),
             AddressRange.FromStartAndSize(0x80001000, 0x8),
-            default,
             "test");
         var result = new FunctionTranslator(image).Translate(
             0x80001000,

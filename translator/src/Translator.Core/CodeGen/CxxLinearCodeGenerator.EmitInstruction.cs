@@ -16,28 +16,18 @@ public sealed partial class CxxLinearCodeGenerator
         IrCfg cfg, Dictionary<string, string> labelNames, RepresentationEnvironment types, FunctionAbiClassification signature,
         Dictionary<string, bool> localPaired, IGuestFunctionAbiProvider guestAbiProvider,
         IReadOnlyDictionary<string, uint> knownConstants,
-        IReadOnlyDictionary<string, uint> localConstants,
-        LinkedAddressRemap? linkedAddressRemap,
-        IReadOnlySet<uint> nonReturningCallTargets,
-        IReadOnlySet<uint> lrContinuationCallTargets,
         StackAddressFacts stackFacts,
         bool inlineGuestThunkStackBase,
         uint? localFallthroughLr,
         IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts,
         IReadOnlyDictionary<uint, GuestAbiContract> stateFreeAbiContracts,
         IReadOnlyDictionary<uint, string> stateFreeCallSymbols,
-        IReadOnlyDictionary<GuestStateFreeCallSiteKey, GuestStateFreeCallVariant> stateFreeCallSiteVariants,
-        IReadOnlySet<uint> modOverridableCallTargets,
-        bool shareLrContinuationDispatch,
-        IReadOnlyDictionary<string, HashSet<string>>? resumeLabelPairedStates)
+        IReadOnlyDictionary<GuestStateFreeCallSiteKey, GuestStateFreeCallVariant> stateFreeCallSiteVariants)
     {
         if (ins is IrPhi)
         {
             return; // Phi nodes are eliminated before codegen.
         }
-
-        // Only a body that a callee can resume mid-block has resume targets.
-        var resumableBody = resumeLabelPairedStates is not null;
 
         var pad = IndentPad(indent);
         switch (ins)
@@ -91,22 +81,22 @@ public sealed partial class CxxLinearCodeGenerator
                     }
                     else if (isFloatDest && load.SizeBytes == 4)
                     {
-                        sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(4, isFloat: true)}({RemapAddress(load.Address, types, localConstants, linkedAddressRemap)});");
+                        sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(4, isFloat: true)}({Address(load.Address, types)});");
                     }
                     else if (isFloatDest && load.SizeBytes == 8)
                     {
-                        sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(8, isFloat: true)}({RemapAddress(load.Address, types, localConstants, linkedAddressRemap)});");
+                        sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(8, isFloat: true)}({Address(load.Address, types)});");
                     }
                     else if (TryGetKnownEffectiveAddress(load.Address, knownConstants, out var knownLoadAddress) &&
                              FlatWriteNeedsPolicy(knownLoadAddress))
                     {
                         // The flat view maps the MMIO window no-access, so a hardware register read would fault
                         // without knowing its width. The checked read reaches the runtime's register HLE.
-                        sb.AppendLine($"{pad}{dest} = {CheckedMmioLoadHelper(load.SizeBytes)}({RemapAddress(load.Address, types, localConstants, linkedAddressRemap)});");
+                        sb.AppendLine($"{pad}{dest} = {CheckedMmioLoadHelper(load.SizeBytes)}({Address(load.Address, types)});");
                     }
                     else
                     {
-                        sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(load.SizeBytes, isFloat: false)}({RemapAddress(load.Address, types, localConstants, linkedAddressRemap)});");
+                        sb.AppendLine($"{pad}{dest} = {GuestLoadHelper(load.SizeBytes, isFloat: false)}({Address(load.Address, types)});");
                     }
                     if (IsFloatRegister(load.Destination))
                     {
@@ -131,16 +121,14 @@ public sealed partial class CxxLinearCodeGenerator
 
                     // Both forms below trust the constant a static def produced: the
                     // FIFO form drops the address and the RAM form skips the MMIO test.
-                    // A resumed body may not have run that def. The checked MMIO load
-                    // above still reads the runtime address, so it stays.
-                    if (!resumableBody && TryEmitKnownGpuFifoStore(store, srcExpr, isFloatStore, sb, pad, knownConstants))
+                    if (TryEmitKnownGpuFifoStore(store, srcExpr, isFloatStore, sb, pad, knownConstants))
                     {
                         break;
                     }
 
                     // A translate-time-constant address outside the MMIO window (gather-pipe already handled
                     // above) always takes the flat helper's plain-store arm, so the runtime MMIO test is provably dead.
-                    var provenRamStore = !resumableBody &&
+                    var provenRamStore =
                         TryGetKnownEffectiveAddress(store.Address, knownConstants, out var knownStoreAddress) &&
                         IsProvenRamStore(knownStoreAddress, store.SizeBytes);
                     string StoreHelper(int sizeBytes, bool isFloat) => provenRamStore
@@ -152,11 +140,11 @@ public sealed partial class CxxLinearCodeGenerator
                     }
                     else if (isFloatStore && store.SizeBytes == 4)
                     {
-                        sb.AppendLine($"{pad}{StoreHelper(4, isFloat: true)}({RemapAddress(store.Address, types, localConstants, linkedAddressRemap)}, {srcExpr});");
+                        sb.AppendLine($"{pad}{StoreHelper(4, isFloat: true)}({Address(store.Address, types)}, {srcExpr});");
                     }
                     else if (isFloatStore && store.SizeBytes == 8)
                     {
-                        sb.AppendLine($"{pad}{StoreHelper(8, isFloat: true)}({RemapAddress(store.Address, types, localConstants, linkedAddressRemap)}, {srcExpr});");
+                        sb.AppendLine($"{pad}{StoreHelper(8, isFloat: true)}({Address(store.Address, types)}, {srcExpr});");
                     }
                     else
                     {
@@ -171,15 +159,14 @@ public sealed partial class CxxLinearCodeGenerator
                             1 or 2 => $"static_cast<uint{Bits(store.SizeBytes)}_t>({srcExpr})",
                             _ => $"static_cast<uint32_t>({srcExpr})"
                         };
-                        sb.AppendLine($"{pad}{StoreHelper(store.SizeBytes, isFloat: false)}({RemapAddress(store.Address, types, localConstants, linkedAddressRemap)}, {integerSource});");
+                        sb.AppendLine($"{pad}{StoreHelper(store.SizeBytes, isFloat: false)}({Address(store.Address, types)}, {integerSource});");
                     }
                 }
                 break;
             case IrResolveGuestMemoryRange resolve:
                 {
-                    var start = RemapAddress(
-                        new IrAddress(resolve.Base.RegisterName!, resolve.MinOffset),
-                        types, localConstants, linkedAddressRemap);
+                    var start = Address(
+                        new IrAddress(resolve.Base.RegisterName!, resolve.MinOffset), types);
                     sb.AppendLine($"{pad}{resolve.Destination} = MemoryInline::ResolveRangeHost({start}, 0, {resolve.Length}u, {(resolve.NeedsReadAccess ? "true" : "false")}, {(resolve.NeedsWriteAccess ? "true" : "false")});");
                 }
                 break;
@@ -188,7 +175,7 @@ public sealed partial class CxxLinearCodeGenerator
                     var dest = ToDestination(load.Destination, types);
                     var destType = types.Get(load.Destination);
                     var isFloatDest = (destType is ValueRepresentation pt && pt.IsFloat) || IsFloatRegister(load.Destination);
-                    var address = RemapAddress(load.OriginalAddress, types, localConstants, linkedAddressRemap);
+                    var address = Address(load.OriginalAddress, types);
                     var helper = isFloatDest ? $"Float{Bits(load.SizeBytes)}" : Bits(load.SizeBytes).ToString();
                     sb.AppendLine($"{pad}{dest} = MemoryInline::ReadResolved{helper}({load.Range}, {load.RangeOffset}u, {address});");
                     if (IsFloatRegister(load.Destination))
@@ -203,7 +190,7 @@ public sealed partial class CxxLinearCodeGenerator
                     if (isFloatStore && store.SizeBytes == 4 && store.Source.RegisterName is not null &&
                         localPaired.TryGetValue(GetRegisterBaseName(store.Source.RegisterName), out var sourceIsPaired) && sourceIsPaired)
                         srcExpr = $"PPC_PsToScalarInline({srcExpr})";
-                    var address = RemapAddress(store.OriginalAddress, types, localConstants, linkedAddressRemap);
+                    var address = Address(store.OriginalAddress, types);
                     var helper = isFloatStore ? $"Float{Bits(store.SizeBytes)}" : Bits(store.SizeBytes).ToString();
                     var value = isFloatStore || store.SizeBytes == 4 ? srcExpr : $"static_cast<uint{Bits(store.SizeBytes)}_t>({srcExpr})";
                     sb.AppendLine($"{pad}MemoryInline::WriteResolved{helper}({store.Range}, {store.RangeOffset}u, {address}, {value});");
@@ -259,8 +246,8 @@ public sealed partial class CxxLinearCodeGenerator
                         (types.Get(destination) is ValueRepresentation primitive && primitive.IsFloat) || IsFloatRegister(destination);
                     var firstFloat = IsFloat(pair.FirstDestination);
                     var secondFloat = IsFloat(pair.SecondDestination);
-                    var firstAddress = RemapAddress(pair.FirstOriginalAddress, types, localConstants, linkedAddressRemap);
-                    var secondAddress = RemapAddress(pair.SecondOriginalAddress, types, localConstants, linkedAddressRemap);
+                    var firstAddress = Address(pair.FirstOriginalAddress, types);
+                    var secondAddress = Address(pair.SecondOriginalAddress, types);
                     var pairHelper = pair.ElementSizeBytes == 2
                         ? $"MemoryInline::ReadResolvedPair16({pair.Range}, {pair.RangeOffset}u)"
                         : $"MemoryInline::ReadResolvedPair32({pair.Range}, {pair.RangeOffset}u)";
@@ -311,8 +298,8 @@ public sealed partial class CxxLinearCodeGenerator
                     var packed = pair.ElementSizeBytes == 2
                         ? $"((static_cast<uint32_t>(static_cast<uint16_t>({lowSource})) << 16) | static_cast<uint16_t>({highSource}))"
                         : $"((static_cast<uint64_t>({Raw(lowSource, lowFloat)}) << 32) | {Raw(highSource, highFloat)})";
-                    var firstAddress = RemapAddress(pair.FirstOriginalAddress, types, localConstants, linkedAddressRemap);
-                    var secondAddress = RemapAddress(pair.SecondOriginalAddress, types, localConstants, linkedAddressRemap);
+                    var firstAddress = Address(pair.FirstOriginalAddress, types);
+                    var secondAddress = Address(pair.SecondOriginalAddress, types);
                     var fast = pair.ElementSizeBytes == 2
                         ? $"MemoryInline::WriteResolvedPair16({pair.Range}, {pair.RangeOffset}u, {packed})"
                         : $"MemoryInline::WriteResolvedPair32({pair.Range}, {pair.RangeOffset}u, {packed})";
@@ -330,18 +317,6 @@ public sealed partial class CxxLinearCodeGenerator
                 {
                     if (TryEmitInlineGuestThunk(addr, sb, pad, types, inlineGuestThunkStackBase))
                     {
-                        // A restore replaces those FPRs with scalar stack values.
-                        // A resumable body relies on its tags matching the flow,
-                        // which models the same reset.
-                        if (resumableBody &&
-                            TryGetInlineGuestThunkSpec(addr, out var thunkSpec) &&
-                            thunkSpec.Kind == InlineGuestThunkKind.RestFpr)
-                        {
-                            for (var reg = thunkSpec.StartRegister; reg <= 31; reg++)
-                            {
-                                localPaired[$"f{reg}"] = false;
-                            }
-                        }
                         break;
                     }
 
@@ -360,23 +335,15 @@ public sealed partial class CxxLinearCodeGenerator
                     var stateFreeContract = hasCallSiteVariant
                         ? callSiteVariant!.Contract
                         : stateFreeAbiContracts.GetValueOrDefault(addr);
-                    // State-free signatures and call-site variants are narrowed by
-                    // CFG liveness, which does not see a resume reading an output.
-                    var usesStateFreeCall = !resumableBody &&
-                                            stateFreeSymbol is not null && stateFreeContract is not null &&
+                    var usesStateFreeCall = stateFreeSymbol is not null && stateFreeContract is not null &&
                                             IsStateFreeCallSafe(stateFreeContract);
-                    var resumesThroughLinkRegister =
-                        nonReturningCallTargets.Contains(addr) ||
-                        (lrContinuationCallTargets.Contains(addr) && localFallthroughLr.HasValue);
                     // The explicit-state signature carries everything the callee reads/writes, so a resident caller
                     // can pass host registers instead of spilling to CpuContext. Excluded: paired-single arg/return
-                    // normalization rewrites ctx->fpr[N] directly, and LR-continuation sites dispatch on ctx->lr
-                    // after the callee writes it, so those keep the full boundary.
+                    // normalization rewrites ctx->fpr[N] directly, so those keep the full boundary.
                     var marshalsStateFreeThroughResidency =
                         usesStateFreeCall &&
                         _activeResidency is not null &&
                         argumentNormalization.Length == 0 &&
-                        !resumesThroughLinkRegister &&
                         !IsGuestPairedScalarFloatReturn(guestAbiProvider, call.Target);
                     if (marshalsStateFreeThroughResidency)
                     {
@@ -389,11 +356,9 @@ public sealed partial class CxxLinearCodeGenerator
                         EmitNormalizeGuestCallFloatReturn(call.Target, sb, pad, localPaired, guestAbiProvider);
                         break;
                     }
-                    // A resume through LR can run code outside this callee's
-                    // contract, including another function reading ctx.
-                    var boundarySync = usesStateFreeCall || argumentNormalization.Length != 0 || resumesThroughLinkRegister
+                    var boundarySync = usesStateFreeCall || argumentNormalization.Length != 0
                         ? ResidencyBoundarySync.Full
-                        : ResolveDirectCallBoundarySync(addr, guestAbiContracts, modOverridableCallTargets);
+                        : ResolveDirectCallBoundarySync(addr, guestAbiContracts);
                     if (!boundarySync.IsFull &&
                         IsGuestPairedScalarFloatReturn(guestAbiProvider, call.Target))
                     {
@@ -430,44 +395,6 @@ public sealed partial class CxxLinearCodeGenerator
                     {
                         RecordEmittedDirectCallTarget(addr);
                         sb.AppendLine($"{pad}InvokeDirectCpu<0x{addr:X8}u>(ctx);");
-                    }
-                    if (resumesThroughLinkRegister)
-                    {
-                        // The callee may resume this body through a local LR
-                        // continuation label, so the locals must be refreshed
-                        // from the context it just wrote. The exit paths below
-                        // return without writing locals back. Both paths see the
-                        // same f1 return normalization an ordinary call applies.
-                        EmitNormalizeGuestCallFloatReturn(call.Target, sb, pad, localPaired, guestAbiProvider);
-                        AppendReload(sb, pad, boundarySync);
-                        var fallbackPad = pad;
-                        if (localFallthroughLr.HasValue)
-                        {
-                            sb.AppendLine($"{pad}if (ctx->lr != 0x{localFallthroughLr.Value:X8}u) {{");
-                            fallbackPad = IndentPad(indent + 1);
-                        }
-
-                        if (shareLrContinuationDispatch)
-                        {
-                            // Shared only when every target expects scalar FPRs.
-                            EmitConvertPairedState(
-                                sb, fallbackPad, localPaired,
-                                new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-                            sb.AppendLine($"{fallbackPad}goto lr_continuation_dispatch;");
-                        }
-                        else
-                        {
-                            EmitLocalLrContinuationDispatch(sb, fallbackPad, labelNames, localPaired, resumeLabelPairedStates);
-                            sb.AppendLine($"{fallbackPad}if (TranslatedFunctionRegistry::FindByAddressPtr(ctx->lr) != nullptr) {{");
-                            sb.AppendLine($"{fallbackPad}    InvokeIndirectCpu(ctx->lr, ctx);");
-                            sb.AppendLine($"{fallbackPad}}}");
-                            sb.AppendLine($"{fallbackPad}return;");
-                        }
-                        if (localFallthroughLr.HasValue)
-                        {
-                            sb.AppendLine($"{pad}}}");
-                        }
-                        break;
                     }
                     EmitNormalizeGuestCallFloatReturn(call.Target, sb, pad, localPaired, guestAbiProvider);
                     AppendReload(sb, pad, boundarySync);
@@ -721,46 +648,6 @@ public sealed partial class CxxLinearCodeGenerator
         };
         sb.AppendLine($"{pad}{helper}(static_cast<uint{fifoStore.ByteLength * 8}_t>({srcExpr}));");
         return true;
-    }
-
-    private static void EmitLocalLrContinuationDispatch(
-        StringBuilder sb,
-        string pad,
-        IReadOnlyDictionary<string, string> labelNames,
-        IReadOnlyDictionary<string, bool>? callSitePaired = null,
-        IReadOnlyDictionary<string, HashSet<string>>? labelPairedStates = null)
-    {
-        var localContinuations = labelNames
-            .Where(static pair => TryParseAddress(pair.Key, out _))
-            .Select(static pair =>
-            {
-                TryParseAddress(pair.Key, out var address);
-                return (Address: address, Label: pair.Value);
-            })
-            .OrderBy(static item => item.Address)
-            .ToArray();
-
-        if (localContinuations.Length == 0)
-        {
-            return;
-        }
-
-        sb.AppendLine($"{pad}switch (ctx->lr) {{");
-        foreach (var (address, label) in localContinuations)
-        {
-            RecordEmittedLocalLabel(label);
-            sb.AppendLine($"{pad}case 0x{address:X8}u:");
-            // Each case is an edge from the call site into that label.
-            if (callSitePaired is not null && labelPairedStates is not null)
-            {
-                EmitConvertPairedState(sb, pad + "    ", callSitePaired, labelPairedStates[label]);
-            }
-            sb.AppendLine($"{pad}    goto {label};");
-        }
-
-        sb.AppendLine($"{pad}default:");
-        sb.AppendLine($"{pad}    break;");
-        sb.AppendLine($"{pad}}}");
     }
 
     private static bool TryGetKnownEffectiveAddress(

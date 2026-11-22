@@ -65,26 +65,4 @@ public sealed class GeneratedMarkersTests
         Assert.Equal("FC000000", match.Groups["mask"].Value);
         Assert.Matches(GeneratedMarkers.RegistrationLinePattern(), marker + "\n");
     }
-
-    [Fact]
-    public void ModRegistrationMarkerRoundTripsThroughItsPattern()
-    {
-        var marker = GeneratedMarkers.ModRegistration(
-            0x80002000u, "rr_80002000", "Pretty::Name", false, 0x00004000u, 100u, 7ul);
-
-        Assert.Equal(
-            "// RECOMP_REGISTRATION mod 0x80002000 rr_80002000 \"Pretty::Name\" " +
-            "preserves=false fpr_mask=0x00004000 priority=100 module_id=7",
-            marker);
-
-        var match = GeneratedMarkers.ModRegistrationPattern().Match(marker);
-        Assert.True(match.Success);
-        Assert.Equal("80002000", match.Groups["address"].Value);
-        Assert.Equal("rr_80002000", match.Groups["symbol"].Value);
-        Assert.Equal("Pretty::Name", match.Groups["name"].Value);
-        Assert.Equal("false", match.Groups["preserves"].Value);
-        Assert.Equal("00004000", match.Groups["mask"].Value);
-        Assert.Equal("100", match.Groups["priority"].Value);
-        Assert.Equal("7", match.Groups["moduleId"].Value);
-    }
 }

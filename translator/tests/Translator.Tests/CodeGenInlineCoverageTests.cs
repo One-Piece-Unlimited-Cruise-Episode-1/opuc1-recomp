@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
+using Translator.Core.Analysis;
 using Translator.Core.CodeGen;
 using Translator.Core.Ir;
 using Translator.Core.Representation;
@@ -21,7 +22,7 @@ public class CodeGenInlineCoverageTests
     {
         var method = GeneratorType.GetMethod("TryEmitInlinePpc", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
-        return (bool)method!.Invoke(null, new object?[] { call, sb, "    ", types, localPaired })!;
+        return (bool)method!.Invoke(null, new object?[] { call, sb, "    ", types, localPaired, StackAddressFacts.Empty })!;
     }
 
     [Fact]

@@ -31,10 +31,7 @@ public sealed partial class CxxLinearCodeGenerator
         // a reload after a boundary, or a write-back. The recording pass summarizes every block as a gen/kill
         // transfer plus its outgoing edge writes; Snapshot() solves the forward union dataflow over them; the
         // real pass replays the same transfer from the solved block-entry state at every flush point.
-        // A function that can resume through a local LR-continuation label has edges this analysis does not
-        // see, so it keeps the old write-back-everything-written behaviour.
         private readonly string? _entryLabel;
-        private readonly bool _conservative;
         private Dictionary<string, BlockSummary>? _blocks;
         private Dictionary<string, DirtySet>? _blockIn;
         private BlockSummary? _activeBlock;
@@ -112,19 +109,18 @@ public sealed partial class CxxLinearCodeGenerator
             public readonly List<(string Target, DirtySet Gen)> Edges = new();
         }
 
-        private RegisterResidency(bool recording, string? entryLabel = null, bool conservative = false)
+        private RegisterResidency(bool recording, string? entryLabel = null)
         {
             _recording = recording;
             _entryLabel = entryLabel;
-            _conservative = conservative;
         }
 
-        public static RegisterResidency CreateRecorder(string? entryLabel = null, bool conservative = false) =>
-            new(true, entryLabel, conservative) { _blocks = new Dictionary<string, BlockSummary>(StringComparer.OrdinalIgnoreCase) };
+        public static RegisterResidency CreateRecorder(string? entryLabel = null) =>
+            new(true, entryLabel) { _blocks = new Dictionary<string, BlockSummary>(StringComparer.OrdinalIgnoreCase) };
 
         public RegisterResidency Snapshot()
         {
-            var snapshot = new RegisterResidency(false, _entryLabel, _conservative);
+            var snapshot = new RegisterResidency(false, _entryLabel);
             snapshot._gprs.UnionWith(_gprs);
             snapshot._fprs.UnionWith(_fprs);
             snapshot._writtenGprs.UnionWith(_writtenGprs);
@@ -157,7 +153,7 @@ public sealed partial class CxxLinearCodeGenerator
         /// </summary>
         private Dictionary<string, DirtySet>? SolveDirtyEntryStates(DirtySet all)
         {
-            if (_blocks is null || _conservative || _entryLabel is null || !_blocks.ContainsKey(_entryLabel))
+            if (_blocks is null || _entryLabel is null || !_blocks.ContainsKey(_entryLabel))
                 return null;
 
             var ins = new Dictionary<string, DirtySet>(StringComparer.OrdinalIgnoreCase);
@@ -255,7 +251,7 @@ public sealed partial class CxxLinearCodeGenerator
 
         private DirtySet CurrentDirty()
         {
-            if (_activeBlock is null || _conservative) return WrittenSet();
+            if (_activeBlock is null) return WrittenSet();
             return _activeBlock.Transfer.Apply(_activeIn);
         }
 
@@ -619,15 +615,13 @@ public sealed partial class CxxLinearCodeGenerator
     }
 
     /// <summary>
-    /// Resolves the boundary sync set for a direct guest call, falling back to <see cref="ResidencyBoundarySync.Full"/> when narrowing is disabled, residency is inactive, the callee has no contract or a full-sync fence, or a mod could replace the callee with a re-translation this body's contract doesn't describe.
+    /// Resolves the boundary sync set for a direct guest call, falling back to <see cref="ResidencyBoundarySync.Full"/> when narrowing is disabled, residency is inactive, or the callee has no contract or a full-sync fence.
     /// </summary>
     private static ResidencyBoundarySync ResolveDirectCallBoundarySync(
         uint target,
-        IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts,
-        IReadOnlySet<uint> modOverridableCallTargets)
+        IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts)
     {
         if (_activeResidency is null ||
-            modOverridableCallTargets.Contains(target) ||
             !guestAbiContracts.TryGetValue(target, out var contract))
         {
             return ResidencyBoundarySync.Full;

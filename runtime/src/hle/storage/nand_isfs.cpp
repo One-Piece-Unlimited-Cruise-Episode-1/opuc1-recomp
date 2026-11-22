@@ -8,7 +8,6 @@
 #include "nand_internal.h"
 #include "host_file.h"
 
-#include "discord_presence.h"
 #include "runtime_log.h"
 
 
@@ -62,21 +61,10 @@ struct ISFSFileStats {
 // Special FD for /dev/fs (the ISFS device)
 static constexpr int32_t ISFS_DEV_FD = 1;
 static constexpr int32_t ES_DEV_FD = 3;
-static constexpr int32_t DOLPHIN_DEV_FD = 4;
 static constexpr uint32_t ES_IOCTL_GETDEVICEID = 0x07;
 static constexpr uint32_t ES_IOCTL_GETDEVICECERT = 0x1E;
 static constexpr uint32_t ES_IOCTL_GETTITLEID = 0x20;
 static constexpr uint32_t ES_IOCTL_SIGN = 0x30;
-static constexpr uint32_t DOLPHIN_IOCTL_GET_ELAPSED_TIME = 0x01;
-static constexpr uint32_t DOLPHIN_IOCTL_GET_VERSION = 0x02;
-static constexpr uint32_t DOLPHIN_IOCTL_GET_SPEED_LIMIT = 0x03;
-static constexpr uint32_t DOLPHIN_IOCTL_SET_SPEED_LIMIT = 0x04;
-static constexpr uint32_t DOLPHIN_IOCTL_GET_CPU_SPEED = 0x05;
-static constexpr uint32_t DOLPHIN_IOCTL_GET_REAL_PRODUCT_CODE = 0x06;
-static constexpr uint32_t DOLPHIN_IOCTL_DISCORD_SET_CLIENT = 0x07;
-static constexpr uint32_t DOLPHIN_IOCTL_DISCORD_SET_PRESENCE = 0x08;
-static constexpr uint32_t DOLPHIN_IOCTL_DISCORD_RESET = 0x09;
-static constexpr uint32_t DOLPHIN_IOCTL_GET_SYSTEM_TIME = 0x0A;
 static constexpr uint32_t SHA_IOCTL_INIT = 0;
 static constexpr uint32_t SHA_IOCTL_UPDATE = 1;
 static constexpr uint32_t SHA_IOCTL_FINAL = 2;
@@ -127,165 +115,6 @@ static bool WriteGuestBytes(uint32_t address, uint32_t size, const uint8_t* data
 
 static bool IsValidGuestRange(uint32_t address, uint32_t size) {
     return size == 0 || (address != 0 && Memory::Contains(address, size));
-}
-
-using DolphinClock = std::chrono::steady_clock;
-// Dolphin starts this clock when the emulation device is constructed, not on its first ioctl.
-static const DolphinClock::time_point g_dolphinElapsedStart = DolphinClock::now();
-
-static uint32_t DolphinElapsedMilliseconds() {
-    return static_cast<uint32_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(DolphinClock::now() - g_dolphinElapsedStart).count());
-}
-
-static int32_t HandleDolphinIoctlv(uint32_t cmd, uint32_t numIn, uint32_t numOut, uint32_t vectorPtr) {
-    if (vectorPtr != 0 && !Memory::Contains(vectorPtr, static_cast<size_t>(numIn + numOut) * 8u)) {
-        return ISFS_EINVAL;
-    }
-
-    // Every /dev/dolphin command answers through exactly one output vector.
-    // `minimumSize` 0 means the case validates the buffer itself (WriteGuestBytes).
-    const auto singleOut = [&](uint32_t minimumSize, IosVector& out) -> bool {
-        if (numOut != 1 || vectorPtr == 0) {
-            return false;
-        }
-        out = ReadIosVector(vectorPtr, numIn);
-        return minimumSize == 0 ||
-               (out.size >= minimumSize && Memory::Contains(out.address, minimumSize));
-    };
-
-    IosVector out;
-    switch (cmd) {
-        case DOLPHIN_IOCTL_GET_ELAPSED_TIME: {
-            if (!singleOut(4u, out)) {
-                return ISFS_EINVAL;
-            }
-            Memory::Write32(out.address, DolphinElapsedMilliseconds());
-            return ISFS_OK;
-        }
-
-        case DOLPHIN_IOCTL_GET_VERSION: {
-            if (!singleOut(0u, out)) {
-                return ISFS_EINVAL;
-            }
-            static constexpr char kVersion[] = "OPUC1Recomp-DolphinDevice";
-            if (!WriteGuestBytes(out.address, out.size,
-                                 reinterpret_cast<const uint8_t*>(kVersion), sizeof(kVersion))) {
-                return ISFS_EINVAL;
-            }
-            return ISFS_OK;
-        }
-
-        case DOLPHIN_IOCTL_GET_SPEED_LIMIT:
-        case DOLPHIN_IOCTL_GET_CPU_SPEED: {
-            if (!singleOut(4u, out)) {
-                return ISFS_EINVAL;
-            }
-            Memory::Write32(out.address, cmd == DOLPHIN_IOCTL_GET_SPEED_LIMIT ? 100u : 729000000u);
-            return ISFS_OK;
-        }
-
-        case DOLPHIN_IOCTL_GET_REAL_PRODUCT_CODE: {
-            if (!singleOut(0u, out)) {
-                return ISFS_EINVAL;
-            }
-            char productCode[8] = {};
-            uint32_t discId = Memory::Contains(0x80000000u, 4u) ? Memory::Read32(0x80000000u) : NandTitleIdLo();
-            productCode[0] = static_cast<char>((discId >> 24) & 0xffu);
-            productCode[1] = static_cast<char>((discId >> 16) & 0xffu);
-            productCode[2] = static_cast<char>((discId >> 8) & 0xffu);
-            productCode[3] = static_cast<char>(discId & 0xffu);
-            productCode[4] = '0';
-            productCode[5] = '1';
-            if (!WriteGuestBytes(out.address, out.size,
-                                 reinterpret_cast<const uint8_t*>(productCode), sizeof(productCode))) {
-                return ISFS_EINVAL;
-            }
-            return ISFS_OK;
-        }
-
-        case DOLPHIN_IOCTL_SET_SPEED_LIMIT:
-            return ISFS_OK;
-
-        case DOLPHIN_IOCTL_DISCORD_SET_CLIENT: {
-            if (numIn != 1 || numOut != 0 || vectorPtr == 0) {
-                return ISFS_EINVAL;
-            }
-            const IosVector client = ReadIosVector(vectorPtr, 0);
-            if (!IsValidGuestRange(client.address, client.size)) {
-                return ISFS_EINVAL;
-            }
-            if (RuntimeConfigFile::DiscordPresenceEnabled()) {
-                DiscordPresence::SetClient(ReadGuestCString(client.address, client.size));
-            }
-            return ISFS_OK;
-        }
-
-        case DOLPHIN_IOCTL_DISCORD_SET_PRESENCE: {
-            if (numIn != 10 || numOut != 0 || vectorPtr == 0) {
-                return ISFS_EINVAL;
-            }
-            std::array<IosVector, 10> values{};
-            for (uint32_t index = 0; index < values.size(); ++index) {
-                values[index] = ReadIosVector(vectorPtr, index);
-                if (!IsValidGuestRange(values[index].address, values[index].size)) {
-                    return ISFS_EINVAL;
-                }
-            }
-            if (RuntimeConfigFile::DiscordPresenceEnabled()) {
-                DiscordPresence::Activity activity;
-                activity.details = ReadGuestCString(values[0].address, values[0].size);
-                activity.state = ReadGuestCString(values[1].address, values[1].size);
-                activity.largeImageKey = ReadGuestCString(values[2].address, values[2].size);
-                activity.largeImageText = ReadGuestCString(values[3].address, values[3].size);
-                activity.smallImageKey = ReadGuestCString(values[4].address, values[4].size);
-                activity.smallImageText = ReadGuestCString(values[5].address, values[5].size);
-                if (values[6].size >= 8 && Memory::Contains(values[6].address, 8)) {
-                    activity.startTimestamp = static_cast<int64_t>(
-                        (static_cast<uint64_t>(Memory::Read32(values[6].address)) << 32) |
-                        Memory::Read32(values[6].address + 4));
-                }
-                if (values[7].size >= 8 && Memory::Contains(values[7].address, 8)) {
-                    activity.endTimestamp = static_cast<int64_t>(
-                        (static_cast<uint64_t>(Memory::Read32(values[7].address)) << 32) |
-                        Memory::Read32(values[7].address + 4));
-                }
-                if (values[8].size >= 4) {
-                    activity.partySize = Memory::Read32(values[8].address);
-                }
-                if (values[9].size >= 4) {
-                    activity.partyMax = Memory::Read32(values[9].address);
-                }
-                DiscordPresence::SetActivity(std::move(activity));
-            }
-            return ISFS_OK;
-        }
-
-        case DOLPHIN_IOCTL_DISCORD_RESET:
-            if (numIn != 0 || numOut != 0) {
-                return ISFS_EINVAL;
-            }
-            if (RuntimeConfigFile::DiscordPresenceEnabled()) {
-                DiscordPresence::Reset();
-            }
-            return ISFS_OK;
-
-        case DOLPHIN_IOCTL_GET_SYSTEM_TIME: {
-            if (!singleOut(8u, out)) {
-                return ISFS_EINVAL;
-            }
-            const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            const uint64_t value = static_cast<uint64_t>(nowMs);
-            Memory::Write32(out.address, static_cast<uint32_t>(value >> 32));
-            Memory::Write32(out.address + 4u, static_cast<uint32_t>(value));
-            return ISFS_OK;
-        }
-
-        default:
-            LogNandWarning("IOS_Ioctlv", "/dev/dolphin unsupported cmd=%u", cmd);
-            return ISFS_EINVAL;
-    }
 }
 
 static bool WriteShaOutputs(const ShaHandle& handle, const IosVector& context, const IosVector& hash) {
@@ -462,9 +291,6 @@ static int32_t NAND_IOS_Open_Impl(uint32_t pathPtr, uint32_t mode) {
         if (const int32_t btFd = Bluetooth_HLE_OpenDevice(path)) {
             return btFd;
         }
-        if (std::strcmp(path, "/dev/dolphin") == 0) {
-            return DOLPHIN_DEV_FD;
-        }
         LogNandWarning("IOS_Open", "unknown device '%s' mode=%u", path, mode);
         return ISFS_ENOENT;
     }
@@ -518,9 +344,6 @@ static int32_t NAND_IOS_Close_Impl(uint32_t fd) {
         return ISFS_OK;
     }
     if (fd == ES_DEV_FD) {
-        return ISFS_OK;
-    }
-    if (fd == DOLPHIN_DEV_FD) {
         return ISFS_OK;
     }
     if (GetShaHandle(static_cast<int32_t>(fd))) {
@@ -651,10 +474,6 @@ static int32_t NAND_IOS_Ioctl_Impl(
     if (Bluetooth_HLE_IsFd(fd)) {
         LogNandWarning("IOS_Ioctl", "/dev/usb/oh1 does not support scalar ioctl cmd=%u", cmd);
         return -4;
-    }
-    if (fd == DOLPHIN_DEV_FD) {
-        LogNandWarning("IOS_Ioctl", "/dev/dolphin does not support scalar ioctl cmd=%u", cmd);
-        return ISFS_EINVAL;
     }
     
     // Handle /dev/fs ISFS commands
@@ -1045,9 +864,6 @@ static int32_t NAND_IOS_Ioctlv_Impl(
         return HandleShaIoctlv(static_cast<int32_t>(fd), cmd, numIn, numOut, vectorPtr);
     }
 
-    if (fd == DOLPHIN_DEV_FD) {
-        return HandleDolphinIoctlv(cmd, numIn, numOut, vectorPtr);
-    }
 
     if (fd == ISFS_DEV_FD) {
         if (!vectorPtr || !Memory::Contains(vectorPtr, static_cast<size_t>(numIn + numOut) * 8u)) {

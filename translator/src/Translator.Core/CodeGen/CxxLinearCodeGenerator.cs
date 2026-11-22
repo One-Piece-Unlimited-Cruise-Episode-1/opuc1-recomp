@@ -56,7 +56,7 @@ public sealed partial class CxxLinearCodeGenerator
     /// <summary>
     /// Guest addresses appearing as an emitted <c>loc_XXXXXXXX</c> label (definition or goto
     /// target) in the body currently being emitted; replaces scanning emitted text to find a
-    /// translated function's interior resume points.
+    /// translated function's interior labels.
     /// </summary>
     [ThreadStatic]
     private static SortedSet<uint>? _emittedLocalLabelAddresses;
@@ -81,30 +81,18 @@ public sealed partial class CxxLinearCodeGenerator
         SsaResult ssa,
         FunctionAbiClassification signature,
         RepresentationEnvironment types,
-        bool emitModRegistration = false,
-        uint modRegistrationPriority = 100,
-        ulong modRegistrationModuleId = 1,
-        IReadOnlySet<uint>? nonReturningCallTargets = null,
-        IReadOnlySet<uint>? lrContinuationCallTargets = null,
         IReadOnlyDictionary<uint, GuestAbiContract>? guestAbiContracts = null,
         bool emitStateFreeLeafVariant = false,
         IReadOnlyDictionary<uint, GuestAbiContract>? stateFreeAbiContracts = null,
         IReadOnlyDictionary<uint, string>? stateFreeCallSymbols = null,
         IReadOnlyDictionary<GuestStateFreeCallSiteKey, GuestStateFreeCallVariant>? stateFreeCallSiteVariants = null,
         IReadOnlyList<GuestStateFreeCallVariant>? stateFreeEntryVariants = null,
-        uint? moduleLinkBase = null,
-        uint? moduleGuestBase = null,
-        uint moduleLinkedCodeSize = 0,
         IReadOnlyDictionary<string, uint>? gqrEntryConstants = null,
         IReadOnlyDictionary<uint, byte>? gqrCalleeWriteMasks = null,
         bool gqrConstantsRequireRuntimeGuard = false,
         bool enableLeafAbiSpillElision = false,
-        IReadOnlySet<uint>? modOverridableCallTargets = null,
         bool enableGpuFifoBurstCoalescing = true)
     {
-        modOverridableCallTargets ??= new HashSet<uint>();
-        nonReturningCallTargets ??= new HashSet<uint>();
-        lrContinuationCallTargets ??= new HashSet<uint>();
         guestAbiContracts ??= new Dictionary<uint, GuestAbiContract>();
         stateFreeAbiContracts ??= new Dictionary<uint, GuestAbiContract>();
         stateFreeCallSymbols ??= new Dictionary<uint, string>();
@@ -121,70 +109,26 @@ public sealed partial class CxxLinearCodeGenerator
         var leafStackFunction = elideLeafAbiSpills
             ? ElideLeafStackFprSaveRestore(leafGprStackFunction, types)
             : leafGprStackFunction;
-        // A body that a callee can resume at any instruction label is entered on
-        // paths the static CFG does not see. Facts carried from one guest
-        // instruction to a later one do not hold on those paths, so the passes
-        // that forward them stay off for it. Removing an overwritten psq stack
-        // load also rests on a stack proof a resume can skip, and the load's
-        // memory access is still observable then.
-        var resumableBody = HasOutOfBandLocalEntry(leafStackFunction, nonReturningCallTargets, lrContinuationCallTargets);
-        var func = ElideDeadPureLocalTemps(resumableBody
-            ? leafStackFunction
-            : ElideFctiwStackLowWordLoads(ElideOverwrittenPsqStackLoads(leafStackFunction), types));
+        var func = ElideDeadPureLocalTemps(
+            ElideFctiwStackLowWordLoads(ElideOverwrittenPsqStackLoads(leafStackFunction), types));
         var isGuestCallFree = FunctionEligibleForLeafRegisterCache(func);
         var hasProvenKernelEntry = isGuestCallFree && gqrEntryConstants is { Count: > 0 };
-        if (!resumableBody)
-        {
-            func = GqrConstantPropagation.Specialize(
-                func, gqrEntryConstants, gqrCalleeWriteMasks,
-                gqrConstantsRequireRuntimeGuard);
-        }
+        func = GqrConstantPropagation.Specialize(
+            func, gqrEntryConstants, gqrCalleeWriteMasks,
+            gqrConstantsRequireRuntimeGuard);
         // Call-free proven kernels amortize very small ranges. Ordinary functions
         // use the epoch-safe scalar form and a higher threshold to avoid adding
-        // pointer locals for incidental field pairs. Range resolves and access pairs
-        // are placed by the static CFG, so a resumable body keeps its plain accesses.
-        if (!resumableBody)
-        {
-            func = GuestMemoryRangeLowering.Lower(
-                func, minimumAccesses: hasProvenKernelEntry ? 2 : 8, ignoreDisabledPcTraces: true,
-                scalarOnly: !hasProvenKernelEntry);
-        }
+        // pointer locals for incidental field pairs.
+        func = GuestMemoryRangeLowering.Lower(
+            func, minimumAccesses: hasProvenKernelEntry ? 2 : 8, ignoreDisabledPcTraces: true,
+            scalarOnly: !hasProvenKernelEntry);
         var architecturalFunc = func;
         var guestAbiContract = GuestAbiContractAnalyzer.Analyze(architecturalFunc, guestAbiContracts);
-        if (resumableBody)
-        {
-            // The analysis follows CFG paths only. A resume can read a register
-            // past the write that path saw, so callers get a full fence instead.
-            guestAbiContract = guestAbiContract with
-            {
-                GprReadBeforeWriteMask = uint.MaxValue,
-                FprReadBeforeWriteMask = uint.MaxValue,
-                CrReadBeforeWriteMask = byte.MaxValue,
-                ReadsXerBeforeWrite = true,
-                ReadsCtrBeforeWrite = true,
-                ReadsLrBeforeWrite = true,
-                ReadsFpscrBeforeWrite = true,
-                GqrReadBeforeWriteMask = byte.MaxValue,
-                HidReadBeforeWriteMask = byte.MaxValue,
-                GprDefiniteWriteMask = 0,
-                FprDefiniteWriteMask = 0,
-                CrDefiniteWriteMask = 0,
-                DefinitelyWritesXer = false,
-                DefinitelyWritesCtr = false,
-                DefinitelyWritesLr = false,
-                DefinitelyWritesFpscr = false,
-                GqrDefiniteWriteMask = 0,
-                HidDefiniteWriteMask = 0,
-                BoundaryFlags = guestAbiContract.BoundaryFlags | GuestCallBoundaryFlags.RequiresCompleteContext
-            };
-        }
         var cfg = IrCfg.Build(func);
         // Condition-flag elision is planned once against the final IR so every
         // emission of this body (recording pass, public entry, state-free
         // fallback) suppresses exactly the same instruction positions.
-        var flagElision = PlanFlagElision(
-            func, cfg, types, guestAbiContracts, modOverridableCallTargets,
-            nonReturningCallTargets, lrContinuationCallTargets);
+        var flagElision = PlanFlagElision(func, cfg, types, guestAbiContracts);
         // Flattened once per function: the emitter used to hash a (block, index)
         // tuple for every instruction of every emission of this body.
         var suppressedInstructionMasks = BuildSuppressedInstructionMasks(func, flagElision);
@@ -192,7 +136,7 @@ public sealed partial class CxxLinearCodeGenerator
         var leafPreservedFprMask = LeafStackPreservedFprMask(architecturalFunc);
         var nonvolatileFprWriteMask = FunctionNonvolatileFprWriteMask(architecturalFunc) & ~leafPreservedFprMask;
         var preservesNonvolatileFprs = nonvolatileFprWriteMask == 0;
-        var stackFacts = StackAddressFacts.Build(func, trustRegisterCopies: !resumableBody);
+        var stackFacts = StackAddressFacts.Build(func);
         // Register residency supersedes the leaf register cache (localizes state via the
         // expression layer instead of rewriting text, and covers non-leaf bodies too);
         // residency owns every primary body, so the text-rewriting cache survives only for the state-free clone below.
@@ -252,66 +196,7 @@ public sealed partial class CxxLinearCodeGenerator
         var gqrEntryGuards = CollectGqrEntryGuards(func);
 
         var labelNames = func.Blocks.ToDictionary(b => b.Label, b => SanitizeLabel(b.Label), StringComparer.OrdinalIgnoreCase);
-        var instructionContinuationLabels = new Dictionary<uint, string>();
-        var continuationCallCount = func.Blocks.Sum(block =>
-        {
-            var term = block.Instructions.LastOrDefault();
-            var emittedInstructionCount = term is IrBranch or IrJump or IrReturn or IrJumpTable or IrUndefined
-                ? Math.Max(0, block.Instructions.Count - 1)
-                : block.Instructions.Count;
-            var suppressed = suppressedInstructionMasks.TryGetValue(block.Label, out var mask) ? mask : null;
-            return Enumerable.Range(0, emittedInstructionCount).Count(index =>
-            {
-                if ((suppressed is not null && index < suppressed.Length && suppressed[index]) ||
-                    block.Instructions[index] is not IrCall call ||
-                    !TryParseAddress(call.Target, out var target) ||
-                    TryGetInlineGuestThunkSpec(target, out _))
-                {
-                    return false;
-                }
-
-                return nonReturningCallTargets.Contains(target) ||
-                    (lrContinuationCallTargets.Contains(target) &&
-                     TryGetLocalFallthroughLr(block.Instructions, index, nonReturningCallTargets, lrContinuationCallTargets).HasValue);
-            });
-        });
-        // Labels remain available for every recognized continuation target.
-        // Sharing the terminal dispatcher is narrower: it only applies when
-        // more than one emitted call can actually jump there.
-        var needsInstructionContinuationLabels = func.Blocks
-            .SelectMany(static block => block.Instructions)
-            .OfType<IrCall>()
-            .Any(call =>
-                TryParseAddress(call.Target, out var target) &&
-                (nonReturningCallTargets.Contains(target) || lrContinuationCallTargets.Contains(target)));
-        if (needsInstructionContinuationLabels)
-        {
-            foreach (var trace in func.Blocks.SelectMany(static block => block.Instructions).OfType<IrTracePpc>())
-            {
-                var irLabel = $"0x{trace.Address:X8}";
-                if (!labelNames.ContainsKey(irLabel))
-                {
-                    var cxxLabel = SanitizeLabel(irLabel);
-                    labelNames.Add(irLabel, cxxLabel);
-                    instructionContinuationLabels.TryAdd(trace.Address, cxxLabel);
-                }
-            }
-        }
-        var continuationLabelStarts = new Dictionary<string, Dictionary<int, string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var block in func.Blocks)
-        {
-            if (MapContinuationLabelsToInstructionStarts(block.Instructions, instructionContinuationLabels) is { } starts)
-            {
-                continuationLabelStarts[block.Label] = starts;
-            }
-        }
-        var pairedFlow = ComputePairedFlowStates(
-            func, cfg, _guestAbiProvider,
-            continuationLabelStarts.ToDictionary(
-                static pair => pair.Key,
-                static pair => (IReadOnlySet<int>)pair.Value.Keys.ToHashSet(),
-                StringComparer.OrdinalIgnoreCase),
-            inlineGuestThunksKeepTags: resumableBody);
+        var pairedFlow = ComputePairedFlowStates(func, cfg, _guestAbiProvider);
         var pairedIn = pairedFlow.In;
         var pairedOut = pairedFlow.Out;
         var pairedEdgeLiveness = ComputeRegisterLiveness(
@@ -320,47 +205,16 @@ public sealed partial class CxxLinearCodeGenerator
                 new SortedSet<int>(), new SortedSet<int>(Enumerable.Range(0, 32)),
                 new SortedSet<int>(), new SortedSet<int>()),
             _guestAbiProvider);
-        // A resume can jump to any label from any continuation call site. Each
-        // label keeps the paired state its CFG predecessors give it, and the
-        // dispatch converts the call site's state to that one, the same way a
-        // CFG edge into the label would.
-        Dictionary<string, HashSet<string>>? resumeLabelPairedStates = null;
-        if (needsInstructionContinuationLabels)
-        {
-            resumeLabelPairedStates = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-            foreach (var block in func.Blocks)
-            {
-                resumeLabelPairedStates[labelNames[block.Label]] = pairedIn[block.Label];
-            }
-            foreach (var (blockLabel, starts) in continuationLabelStarts)
-            {
-                foreach (var (index, label) in starts)
-                {
-                    resumeLabelPairedStates[label] = pairedFlow.Before[(blockLabel, index)];
-                }
-            }
-        }
-        // The shared dispatcher cannot know which call site it came from, so it
-        // is only used when every target label expects scalar FPRs.
-        var shareLrContinuationDispatch = continuationCallCount > 1 &&
-            (resumeLabelPairedStates?.Values.All(static state => state.Count == 0) ?? true);
         var nextBlockLabels = BuildNextBlockLabelMap(func);
         var knownConstants = BuildKnownUIntConstants(func);
         // Burst coalescing is planned once against the final IR so every
-        // emission of this body sees the same runs and the same buffer names. A
-        // resume into the middle of a burst would flush slots it never wrote.
-        var gpuFifoBurstPlan = BuildGpuFifoBurstPlan(
-            func, knownConstants, enableGpuFifoBurstCoalescing && !needsInstructionContinuationLabels);
+        // emission of this body sees the same runs and the same buffer names.
+        var gpuFifoBurstPlan = BuildGpuFifoBurstPlan(func, knownConstants, enableGpuFifoBurstCoalescing);
         // The state-free clone is derived by rewriting this body's text, and it
         // rewrites the ctx-carrying PSQ helper spellings into the explicit-state
         // ones. Hoisting changes those spellings, so leave it off for the bodies
-        // that clone is made from. A resume label can sit past a reload, so a
-        // resumable body reads its GQRs at each use.
-        var hoistedGqrIndices = CollectHoistableGqrIndices(
-            func, stackFacts, !emitStateFreeLeafVariant && !resumableBody);
-        var linkedAddressRemap = moduleLinkBase.HasValue && moduleGuestBase.HasValue && moduleLinkedCodeSize != 0
-            ? new LinkedAddressRemap(moduleLinkBase.Value, moduleGuestBase.Value, moduleLinkedCodeSize, resumableBody)
-            : null;
+        // that clone is made from.
+        var hoistedGqrIndices = CollectHoistableGqrIndices(func, stackFacts, !emitStateFreeLeafVariant);
         // The complete function body is produced by this local function so it
         // can be emitted more than once with a different residency mode. The
         // inputs above are all deterministic and immutable from here on, so two
@@ -431,7 +285,6 @@ public sealed partial class CxxLinearCodeGenerator
 
                 foreach (var block in func.Blocks)
                 {
-                    var localConstants = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
                     var label = labelNames[block.Label];
                     RecordEmittedLocalLabel(label);
                     _activeResidency?.BeginBlock(block.Label);
@@ -458,27 +311,9 @@ public sealed partial class CxxLinearCodeGenerator
                     var blockSuppressed = suppressedInstructionMasks.TryGetValue(block.Label, out var suppressedMask)
                         ? suppressedMask
                         : null;
-                    continuationLabelStarts.TryGetValue(block.Label, out var continuationLabelsByStart);
 
                     for (var i = 0; i < nonTerminatorCount; i++)
                     {
-                        if (continuationLabelsByStart is not null &&
-                            continuationLabelsByStart.TryGetValue(i, out var continuationLabel))
-                        {
-                            // A resume reaches this label from another call site
-                            // in the state the flow gives it, so the fallthrough is
-                            // brought to that same state.
-                            var labelPaired = resumeLabelPairedStates![continuationLabel];
-                            EmitConvertPairedState(body, "    ", localPaired, labelPaired);
-                            localPaired.Clear();
-                            foreach (var reg in labelPaired)
-                            {
-                                localPaired[reg] = true;
-                            }
-                            RecordEmittedLocalLabel(continuationLabel);
-                            body.AppendLine($"{continuationLabel}: ;");
-                        }
-
                         var directCallOrdinal = -1;
                         if (block.Instructions[i] is IrCall ordinalCall)
                         {
@@ -489,14 +324,11 @@ public sealed partial class CxxLinearCodeGenerator
 
                         if (blockSuppressed is not null && i < blockSuppressed.Length && blockSuppressed[i])
                         {
-                            // Provably dead condition-flag or link-register
-                            // traffic. The constant tracker still observes it so
-                            // address folding is unchanged.
-                            UpdateKnownUIntConstants(block.Instructions[i], localConstants);
+                            // Provably dead condition-flag or link-register traffic.
                             continue;
                         }
 
-                        var localFallthroughLr = TryGetLocalFallthroughLr(block.Instructions, i, nonReturningCallTargets, lrContinuationCallTargets);
+                        var localFallthroughLr = TryGetLocalFallthroughLr(block.Instructions, i);
                         // State-free bodies are cloned after register caching and lose their
                         // direct-call fallbacks, so this initial emission (which must stay a
                         // genuine CpuContext fallback) only requests cache-boundary sync for the legacy resident ABI.
@@ -505,13 +337,12 @@ public sealed partial class CxxLinearCodeGenerator
                         _activeGpuFifoBurstSlot = gpuFifoBurstPlan.Slot(block.Label, i);
                         try
                         {
-                            EmitInstruction(block.Label, directCallOrdinal, block.Instructions[i], body, bufferBaseLength, 1, cfg, labelNames, types, signature, localPaired, _guestAbiProvider, knownConstants, localConstants, linkedAddressRemap, nonReturningCallTargets, lrContinuationCallTargets, stackFacts, inlineGuestThunkStackBase, localFallthroughLr, guestAbiContracts, stateFreeAbiContracts, stateFreeCallSymbols, stateFreeCallSiteVariants, modOverridableCallTargets, shareLrContinuationDispatch, resumeLabelPairedStates);
+                            EmitInstruction(block.Label, directCallOrdinal, block.Instructions[i], body, bufferBaseLength, 1, cfg, labelNames, types, signature, localPaired, _guestAbiProvider, knownConstants, stackFacts, inlineGuestThunkStackBase, localFallthroughLr, guestAbiContracts, stateFreeAbiContracts, stateFreeCallSymbols, stateFreeCallSiteVariants);
                         }
                         finally
                         {
                             _activeGpuFifoBurstSlot = null;
                         }
-                        UpdateKnownUIntConstants(block.Instructions[i], localConstants);
                         if (gpuFifoBurstPlan.Completion(block.Label, i) is { } completedBurst)
                         {
                             body.AppendLine(
@@ -523,7 +354,7 @@ public sealed partial class CxxLinearCodeGenerator
                     switch (term)
                     {
                         case IrUndefined undef:
-                            EmitInstruction(block.Label, -1, undef, body, bufferBaseLength, 1, cfg, labelNames, types, signature, localPaired, _guestAbiProvider, knownConstants, localConstants, linkedAddressRemap, nonReturningCallTargets, lrContinuationCallTargets, stackFacts, inlineGuestThunkStackBase: false, localFallthroughLr: null, guestAbiContracts, stateFreeAbiContracts, stateFreeCallSymbols, stateFreeCallSiteVariants, modOverridableCallTargets, shareLrContinuationDispatch, resumeLabelPairedStates);
+                            EmitInstruction(block.Label, -1, undef, body, bufferBaseLength, 1, cfg, labelNames, types, signature, localPaired, _guestAbiProvider, knownConstants, stackFacts, inlineGuestThunkStackBase: false, localFallthroughLr: null, guestAbiContracts, stateFreeAbiContracts, stateFreeCallSymbols, stateFreeCallSiteVariants);
                             AppendExitFlush(body, "    ");
                             body.AppendLine("    return;");
                             break;
@@ -534,7 +365,7 @@ public sealed partial class CxxLinearCodeGenerator
                             break;
 
                         case IrJump jump:
-                            EmitNormalizePairedStateOnEdge(body, "    ", block.Label, jump.TargetLabel, pairedOut, pairedIn, resumableBody ? null : pairedEdgeLiveness.In);
+                            EmitNormalizePairedStateOnEdge(body, "    ", block.Label, jump.TargetLabel, pairedOut, pairedIn, pairedEdgeLiveness.In);
                             EmitGotoUnlessFallthrough(body, "    ", block.Label, jump.TargetLabel, nextBlockLabels, labelNames, signature.Name);
                             break;
 
@@ -549,10 +380,10 @@ public sealed partial class CxxLinearCodeGenerator
                             // empty "} else {}". Build it first and keep the else
                             // only when it actually carries something.
                             var falseEdge = new StringBuilder();
-                            EmitNormalizePairedStateOnEdge(falseEdge, "        ", block.Label, br.FalseLabel, pairedOut, pairedIn, resumableBody ? null : pairedEdgeLiveness.In);
+                            EmitNormalizePairedStateOnEdge(falseEdge, "        ", block.Label, br.FalseLabel, pairedOut, pairedIn, pairedEdgeLiveness.In);
                             EmitGotoUnlessFallthrough(falseEdge, "        ", block.Label, br.FalseLabel, nextBlockLabels, labelNames, signature.Name);
                             body.AppendLine($"    if ({cond}) {{");
-                            EmitNormalizePairedStateOnEdge(body, "        ", block.Label, br.TrueLabel, pairedOut, pairedIn, resumableBody ? null : pairedEdgeLiveness.In);
+                            EmitNormalizePairedStateOnEdge(body, "        ", block.Label, br.TrueLabel, pairedOut, pairedIn, pairedEdgeLiveness.In);
                             EmitGotoUnlessFallthrough(body, "        ", block.Label, br.TrueLabel, nextBlockLabels, labelNames, signature.Name);
                             if (falseEdge.Length != 0)
                             {
@@ -569,7 +400,7 @@ public sealed partial class CxxLinearCodeGenerator
                             {
                                 var caseLabel = RequireLabel(jt.TargetLabel, labelNames, block.Label, signature.Name);
                                 body.AppendLine($"    case 0x{jt.TargetAddress:X8}u:");
-                                EmitNormalizePairedStateOnEdge(body, "        ", block.Label, jt.TargetLabel, pairedOut, pairedIn, resumableBody ? null : pairedEdgeLiveness.In);
+                                EmitNormalizePairedStateOnEdge(body, "        ", block.Label, jt.TargetLabel, pairedOut, pairedIn, pairedEdgeLiveness.In);
                                 body.AppendLine($"        goto {caseLabel};");
                                 body.AppendLine("        break;");
                             }
@@ -588,7 +419,7 @@ public sealed partial class CxxLinearCodeGenerator
                             var succ = cfg.Successors(block.Label).FirstOrDefault();
                             if (!string.IsNullOrWhiteSpace(succ))
                             {
-                                EmitNormalizePairedStateOnEdge(body, "    ", block.Label, succ!, pairedOut, pairedIn, resumableBody ? null : pairedEdgeLiveness.In);
+                                EmitNormalizePairedStateOnEdge(body, "    ", block.Label, succ!, pairedOut, pairedIn, pairedEdgeLiveness.In);
                                 EmitGotoUnlessFallthrough(body, "    ", block.Label, succ!, nextBlockLabels, labelNames, signature.Name);
                             }
                             else
@@ -609,18 +440,6 @@ public sealed partial class CxxLinearCodeGenerator
                     body.AppendLine();
                 }
 
-                if (shareLrContinuationDispatch)
-                {
-                    // Every call site has already reloaded the callee's state.
-                    // Keep the complete local target set, but emit it only once.
-                    body.AppendLine("    return;");
-                    body.AppendLine("lr_continuation_dispatch:");
-                    EmitLocalLrContinuationDispatch(body, "    ", labelNames);
-                    body.AppendLine("    if (TranslatedFunctionRegistry::FindByAddressPtr(ctx->lr) != nullptr) {");
-                    body.AppendLine("        InvokeIndirectCpu(ctx->lr, ctx);");
-                    body.AppendLine("    }");
-                    body.AppendLine("    return;");
-                }
                 body.Append('}');
                 // The residency discovery pass only exists for its side effects
                 // on the recorder; materializing its text costs a full copy of
@@ -648,9 +467,7 @@ public sealed partial class CxxLinearCodeGenerator
             Environment.NewLine.Length;
         RegisterResidency? residency = null;
         {
-            // A body that can resume through a local LR-continuation label has CFG edges the dirty-register
-            // analysis does not model, so it keeps the write-back-everything-written behaviour.
-            var recorder = RegisterResidency.CreateRecorder(func.EntryLabel, conservative: continuationCallCount > 0);
+            var recorder = RegisterResidency.CreateRecorder(func.EntryLabel);
             EmitFunctionBody(recorder, bodyBufferBaseLength, discardResult: true);
             var discovered = recorder.Snapshot();
             if (!discovered.IsEmpty)
@@ -669,7 +486,7 @@ public sealed partial class CxxLinearCodeGenerator
         sb.AppendLine(EmitFunctionBody(residencyOwnsPrimaryBody ? residency : null, bodyBufferBaseLength));
 
         var aliasName = $"func_{entryPoint:X8}";
-        if (!emitModRegistration && !cxxName.Equals(aliasName, StringComparison.OrdinalIgnoreCase))
+        if (!cxxName.Equals(aliasName, StringComparison.OrdinalIgnoreCase))
         {
             sb.AppendLine();
             sb.AppendLine(FunctionDefinitionSignature(aliasName));
@@ -683,34 +500,18 @@ public sealed partial class CxxLinearCodeGenerator
         sb.AppendLine($"// {guestAbiMarker}");
         // Registration is translator-internal, not code: real registration happens via the shard emitter's bulk
         // registration TUs. This survives only as a marker comment (matching RECOMP_GUEST_ABI's shape) that the
-        // shard emitter and dispatch profile parse out, then strip when composing a compiled shard.
-        CxxBuildRegistrationFacts? registration = null;
-        if (emitModRegistration)
-        {
-            var prettyName = EscapeCxxStringLiteral(signature.Name);
-            sb.AppendLine(GeneratedMarkers.ModRegistration(
-                entryPoint,
-                cxxName,
-                prettyName,
-                preservesNonvolatileFprs,
-                nonvolatileFprWriteMask,
-                modRegistrationPriority,
-                modRegistrationModuleId));
-        }
-        else
-        {
-            sb.AppendLine(GeneratedMarkers.BaseRegistration(
-                entryPoint, cxxName, preservesNonvolatileFprs, nonvolatileFprWriteMask));
-            registration = new CxxBuildRegistrationFacts(
-                cxxName, preservesNonvolatileFprs, nonvolatileFprWriteMask);
-        }
+        // shard emitter parses out, then strips when composing a compiled shard.
+        sb.AppendLine(GeneratedMarkers.BaseRegistration(
+            entryPoint, cxxName, preservesNonvolatileFprs, nonvolatileFprWriteMask));
+        var registration = new CxxBuildRegistrationFacts(
+            cxxName, preservesNonvolatileFprs, nonvolatileFprWriteMask);
 
         var code = sb.ToString();
         GuestStateFreeEmissionFacts? stateFreeFacts = null;
         var stateFreeVariantFacts = new List<GuestStateFreeEmissionFacts>();
         // The state-free clone is derived by rewriting this register-cached body's text, so the ordinary
         // CpuContext body must be captured here, before caching is applied, since it's also the mandatory
-        // fallback for mod overrides and unavailable descendants. It's re-emitted with residency and swapped
+        // fallback for unavailable descendants. It's re-emitted with residency and swapped
         // in after the clone is produced.
         var ordinaryStateFreeFallbackBody = emitStateFreeLeafVariant
             ? (residency is not null
@@ -803,48 +604,13 @@ public sealed partial class CxxLinearCodeGenerator
             stateFreeVariantFacts);
     }
 
-    private static string EscapeCxxStringLiteral(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
-            .Replace("\"", "\\\"", StringComparison.Ordinal);
-
     /// <summary>
-    /// A guest instruction's trace follows its lowered IR, but a resume through LR
-    /// must run that instruction, so its label goes where the instruction's IR starts.
+    /// The constant return address a direct call stores into LR just before it, which the
+    /// state-free call path passes along as the callee's incoming LR.
     /// </summary>
-    private static Dictionary<int, string>? MapContinuationLabelsToInstructionStarts(
-        IReadOnlyList<IrInstruction> instructions,
-        IReadOnlyDictionary<uint, string> continuationLabels)
-    {
-        if (continuationLabels.Count == 0)
-        {
-            return null;
-        }
-
-        Dictionary<int, string>? labelsByStart = null;
-        var start = 0;
-        for (var i = 0; i < instructions.Count; i++)
-        {
-            if (instructions[i] is not IrTracePpc trace)
-            {
-                continue;
-            }
-
-            if (continuationLabels.TryGetValue(trace.Address, out var label))
-            {
-                (labelsByStart ??= new Dictionary<int, string>())[start] = label;
-            }
-
-            start = i + 1;
-        }
-
-        return labelsByStart;
-    }
-
     private static uint? TryGetLocalFallthroughLr(
         IReadOnlyList<IrInstruction> instructions,
-        int index,
-        IReadOnlySet<uint> nonReturningCallTargets,
-        IReadOnlySet<uint> lrContinuationCallTargets)
+        int index)
     {
         if (index <= 0 ||
             instructions[index] is not IrCall ||
@@ -884,45 +650,6 @@ public sealed partial class CxxLinearCodeGenerator
 
         return constants;
     }
-
-    private static void UpdateKnownUIntConstants(IrInstruction instruction, Dictionary<string, uint> constants)
-    {
-        string? destination = instruction switch
-        {
-            IrAssign assign => assign.Destination,
-            IrBinary binary => binary.Destination,
-            IrLoad load => load.Destination,
-            IrCall call => call.Destination,
-            IrIndirectCall call => call.Destination,
-            _ => null
-        };
-
-        if (destination is null)
-        {
-            return;
-        }
-
-        if (instruction is IrAssign constantAssign && TryGetUIntConstant(constantAssign.Value, constants, out var assigned))
-        {
-            constants[destination] = assigned;
-            constants[GetRegisterBaseName(destination)] = assigned;
-        }
-        else if (instruction is IrBinary constantBinary && TryEvaluateUIntBinary(constantBinary, constants, out var calculated))
-        {
-            constants[destination] = calculated;
-            constants[GetRegisterBaseName(destination)] = calculated;
-        }
-        else
-        {
-            constants.Remove(destination);
-            constants.Remove(GetRegisterBaseName(destination));
-        }
-    }
-
-    // GuardAgainstResume: the constant behind a remap may come from an
-    // instruction a resume skipped, so the literal is only used when the runtime
-    // address still equals that constant.
-    private sealed record LinkedAddressRemap(uint LinkBase, uint GuestBase, uint CodeSize, bool GuardAgainstResume);
 
     private static bool TryEvaluateUIntBinary(
         IrBinary binary,
@@ -1131,39 +858,6 @@ public sealed partial class CxxLinearCodeGenerator
         return index is >= 14 and <= 31 ? 1u << index : 0;
     }
 
-    /// <summary>
-    /// Converts every FPR whose tag differs between the current state and the
-    /// state a resume label expects. Liveness is not consulted, because CFG
-    /// liveness does not see the resume paths.
-    /// </summary>
-    private static void EmitConvertPairedState(
-        StringBuilder sb,
-        string pad,
-        IReadOnlyDictionary<string, bool> fromPaired,
-        IReadOnlySet<string> toPaired)
-    {
-        var candidateRegs = new HashSet<string>(toPaired, StringComparer.OrdinalIgnoreCase);
-        candidateRegs.UnionWith(fromPaired.Where(static pair => pair.Value).Select(static pair => pair.Key));
-        foreach (var reg in candidateRegs
-                     .Where(IsFloatRegister)
-                     .OrderBy(ParseFloatRegisterIndex)
-                     .ThenBy(static reg => reg, StringComparer.OrdinalIgnoreCase))
-        {
-            var fromIsPaired = fromPaired.TryGetValue(reg, out var paired) && paired;
-            var toIsPaired = toPaired.Contains(reg);
-            if (fromIsPaired == toIsPaired)
-                continue;
-
-            var regIndex = ParseFloatRegisterIndex(reg);
-            var regExpr = _activeResidency is null
-                ? $"ctx->fpr[{regIndex}].d"
-                : _activeResidency.FprScalar(regIndex, written: true);
-            sb.AppendLine(toIsPaired
-                ? $"{pad}{regExpr} = PPC_PsFromScalarInline({regExpr});"
-                : $"{pad}{regExpr} = PPC_PsToScalarInline({regExpr});");
-        }
-    }
-
     private static void EmitNormalizePairedStateOnEdge(
         StringBuilder sb,
         string pad,
@@ -1171,7 +865,7 @@ public sealed partial class CxxLinearCodeGenerator
         string toLabel,
         IReadOnlyDictionary<string, HashSet<string>> pairedOut,
         IReadOnlyDictionary<string, HashSet<string>> pairedIn,
-        IReadOnlyDictionary<string, HashSet<string>>? liveIn)
+        IReadOnlyDictionary<string, HashSet<string>> liveIn)
     {
         // The edge's own register writes (normalization) and its target are what the dirty-register
         // dataflow needs; every emitted CFG edge goes through here.
@@ -1184,15 +878,10 @@ public sealed partial class CxxLinearCodeGenerator
 
         var candidateRegs = new HashSet<string>(fromSet, StringComparer.OrdinalIgnoreCase);
         candidateRegs.UnionWith(toSet);
-        // Without liveness every mismatch is converted: CFG liveness does not
-        // see a resume that reads the register later.
-        if (liveIn is not null)
-        {
-            if (liveIn.TryGetValue(toLabel, out var targetLive))
-                candidateRegs.IntersectWith(targetLive);
-            else
-                candidateRegs.Clear();
-        }
+        if (liveIn.TryGetValue(toLabel, out var targetLive))
+            candidateRegs.IntersectWith(targetLive);
+        else
+            candidateRegs.Clear();
 
         foreach (var reg in candidateRegs
                      .Where(IsFloatRegister)

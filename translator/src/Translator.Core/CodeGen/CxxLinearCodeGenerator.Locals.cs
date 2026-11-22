@@ -187,8 +187,7 @@ public sealed partial class CxxLinearCodeGenerator
 
     private sealed record PairedFlowStateMaps(
         Dictionary<string, HashSet<string>> In,
-        Dictionary<string, HashSet<string>> Out,
-        Dictionary<(string Block, int Index), HashSet<string>> Before);
+        Dictionary<string, HashSet<string>> Out);
 
     private static HashSet<string> CollectNonRegisterLocals(IrFunction function)
     {
@@ -277,9 +276,7 @@ public sealed partial class CxxLinearCodeGenerator
     private static PairedFlowStateMaps ComputePairedFlowStates(
         IrFunction func,
         IrCfg cfg,
-        IGuestFunctionAbiProvider guestAbiProvider,
-        IReadOnlyDictionary<string, IReadOnlySet<int>>? recordStatesBefore = null,
-        bool inlineGuestThunksKeepTags = false)
+        IGuestFunctionAbiProvider guestAbiProvider)
     {
         var comparer = StringComparer.OrdinalIgnoreCase;
         // f0..f31 occupy bits 0..31. The fixpoint used to seed a fresh
@@ -363,23 +360,6 @@ public sealed partial class CxxLinearCodeGenerator
                     }
                 case IrCall call:
                     {
-                        // The emitter expands save/restore thunks in place. Only
-                        // a restore changes tags, to scalar for what it reloads. A
-                        // resume label's recorded state has to match the emitter.
-                        if (inlineGuestThunksKeepTags &&
-                            TryParseAddress(call.Target, out var thunkAddress) &&
-                            TryGetInlineGuestThunkSpec(thunkAddress, out var thunkSpec))
-                        {
-                            if (thunkSpec.Kind == InlineGuestThunkKind.RestFpr)
-                            {
-                                for (var reg = thunkSpec.StartRegister; reg <= 31; reg++)
-                                {
-                                    newOut &= ~(1u << reg);
-                                }
-                            }
-                            break;
-                        }
-
                         if (IsGuestCallTarget(call.Target))
                         {
                             // Normalize proven scalar arguments and treat f1 as the
@@ -532,32 +512,7 @@ public sealed partial class CxxLinearCodeGenerator
             outMap[blocks[i].Label] = MaterializePairedFloatSet(outMasks[i], comparer);
         }
 
-        // The settled state in front of selected instructions, for labels a
-        // resume can reach in the middle of a block.
-        var beforeMap = new Dictionary<(string Block, int Index), HashSet<string>>();
-        if (recordStatesBefore is not null)
-        {
-            for (var b = 0; b < blockCount; b++)
-            {
-                var block = blocks[b];
-                if (!recordStatesBefore.TryGetValue(block.Label, out var indices) || indices.Count == 0)
-                {
-                    continue;
-                }
-
-                var mask = inMasks[b];
-                for (var i = 0; i < block.Instructions.Count; i++)
-                {
-                    if (indices.Contains(i))
-                    {
-                        beforeMap[(block.Label, i)] = MaterializePairedFloatSet(mask, comparer);
-                    }
-                    mask = TransferPairedMask(block.Instructions[i], mask);
-                }
-            }
-        }
-
-        return new PairedFlowStateMaps(inMap, outMap, beforeMap);
+        return new PairedFlowStateMaps(inMap, outMap);
     }
 
     private static uint ClearPairedGuestScalarFloatArguments(

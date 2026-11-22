@@ -8,10 +8,6 @@ PageEntry g_pageTable[kPageCount]{};
 uintptr_t g_fullPageBias[kPageCount]{};
 uintptr_t g_fullReadablePageBias[kPageCount]{};
 uintptr_t g_fullWritablePageBias[kPageCount]{};
-const SparseWritablePageTable* g_sparseWritablePageTables[kPageCount]{};
 uint8_t g_deferredReadCoveredPages[kPageCount]{};
 }
 
-namespace RecompMod {
-std::atomic<uint8_t> g_executableWriteGuardPages[kExecutableWriteGuardPageCount]{};
-}

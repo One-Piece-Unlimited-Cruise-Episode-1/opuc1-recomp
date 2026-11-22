@@ -77,15 +77,12 @@ struct RuntimeUserConfig {
     std::optional<bool> steamInputOverride;
     std::optional<uint32_t> steamInputAppId;
     std::optional<bool> discordPresenceEnabled;
-    // The application ID of the Discord application for Rich Presence. This is only
-    // used by the base product; Retro Rewind supplies its own ID through the
-    // standard Dolphin /dev/dolphin interface.
+    // The application ID of the Discord application for Rich Presence; presence stays off without one.
     std::optional<std::string> discordClientId;
     std::optional<std::string> nandRoot;
     std::optional<std::string> dvdRoot;
     // The one canonical Retro Rewind installation, owned and updated by the frontend. Setup records
     // it here instead of copying the pack, so an asset-only update is visible on the next launch.
-    std::optional<std::string> retroRewindRoot;
     std::vector<std::string> overlayRoots;
     // Controller mappings use Wii/GameCube button names as keys and up to two
     // comma-separated SDL-style physical button names ("south", or
@@ -330,8 +327,7 @@ inline void EnsureConfigFile() {
               "[paths]\n"
               "# dvd_root = \"D:\\\\OPUC1\\\\DATA\"\n"
               "# nand_root = \"D:\\\\WiiNand\"\n"
-              "# retro_rewind_root = \"D:\\\\RetroRewind\\\\RetroRewind6\"\n"
-              "# overlay_roots = [\"D:\\\\RetroRewind\"]\n";
+              "# overlay_roots = [\"D:\\\\OPUC1\\\\Mods\"]\n";
     RuntimeHostFile::WriteAtomically(path, output.str(), false);
 }
 
@@ -523,7 +519,6 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
 
     config.nandRoot = FindConfigValue<std::string>(document, "paths", "nand_root");
     config.dvdRoot = FindConfigValue<std::string>(document, "paths", "dvd_root");
-    config.retroRewindRoot = FindConfigValue<std::string>(document, "paths", "retro_rewind_root");
     if (auto roots = FindConfigValue<std::vector<std::string>>(document, "paths", "overlay_roots")) {
         for (auto& root : *roots) {
             root = Trim(root);
@@ -1085,11 +1080,6 @@ inline std::filesystem::path ResolvedDvdRoot() {
     return configured.empty() ? std::filesystem::path{} : ResolveRelativeToConfig(configured);
 }
 
-/// The canonical Retro Rewind installation the frontend owns, or "" when none is recorded.
-inline std::string RetroRewindRoot(std::string fallback = "") {
-    return Get().retroRewindRoot.value_or(std::move(fallback));
-}
-
 inline bool DiscordPresenceEnabled(bool fallback = true) {
     return Get().discordPresenceEnabled.value_or(fallback);
 }
@@ -1159,9 +1149,6 @@ inline void LogLoadedConfig() {
             }
             if (config.nandRoot) {
                 std::cout << " nand_root=" << *config.nandRoot;
-            }
-            if (config.retroRewindRoot) {
-                std::cout << " retro_rewind_root=" << *config.retroRewindRoot;
             }
         }
         std::cout << std::endl;

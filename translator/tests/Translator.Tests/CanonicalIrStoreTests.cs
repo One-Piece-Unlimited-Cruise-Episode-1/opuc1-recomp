@@ -17,7 +17,6 @@ public sealed class CanonicalIrStoreTests
             memory,
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, (uint)memory.Length),
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, (uint)memory.Length),
-            default,
             "canonical-test");
         var translator = new FunctionTranslator(image);
         var options = TranslationOptions.Default with

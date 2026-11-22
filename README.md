@@ -108,9 +108,6 @@ dotnet build translator/Translator.sln -c Release
 dotnet test translator/Translator.sln -c Release
 ```
 
-Ten of the tests read Mario Kart Wii project files that are not part of this repository and fail without them; CI
-leaves them out with the filter in [`.github/workflows/build.yml`](.github/workflows/build.yml).
-
 ### Layout
 
 | Path | What |

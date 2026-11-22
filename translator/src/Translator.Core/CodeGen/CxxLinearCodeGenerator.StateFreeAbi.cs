@@ -167,10 +167,9 @@ public sealed partial class CxxLinearCodeGenerator
                 !contracts.TryGetValue(address, out var contract) ||
                 !StateFreeFitsNativeRegisterBudget(contract)))
             return "false";
-        // Base shards are shared by base and Retro Rewind; profile-neutral dispatch can still pick a mod
-        // translation for any descendant even with compile-time-constant call traits. Every member must
-        // resolve to the base body before skipping CpuContext dispatch, or the region silently drops a
-        // Retro Rewind override and corrupts guest state.
+        // Runtime dispatch can still pick a different winner for any descendant even with
+        // compile-time-constant call traits. Every member must resolve to the base body before
+        // skipping CpuContext dispatch, or the region silently drops that override.
         return $"MkwStateFreeAbiEnabled(0x{root:X8}u) && " + string.Join(" && ", region.Select(static address =>
             $"KnownTranslatedCpuCall<0x{address:X8}u>::kAvailable && " +
             $"!KnownTranslatedCpuCall<0x{address:X8}u>::kMustRemainDynamicallyDispatchable && " +
@@ -356,9 +355,9 @@ public sealed partial class CxxLinearCodeGenerator
 
     /// <summary>
     /// Emits one state-free call site whose fast arm marshals through the resident locals.
-    /// <para>The <c>InvokeDirectCpu</c> fallback arm is live code, not dead code, since a mod overlay
-    /// can replace any region member after this body was emitted, so it carries its own full
-    /// flush/reload pair; only the fast arm skips the CpuContext boundary.</para>
+    /// <para>The <c>InvokeDirectCpu</c> fallback arm is live code, not dead code, since the runtime
+    /// availability check can route any region member elsewhere after this body was emitted, so it
+    /// carries its own full flush/reload pair; only the fast arm skips the CpuContext boundary.</para>
     /// </summary>
     private static void EmitResidentStateFreeCall(
         StringBuilder sb,

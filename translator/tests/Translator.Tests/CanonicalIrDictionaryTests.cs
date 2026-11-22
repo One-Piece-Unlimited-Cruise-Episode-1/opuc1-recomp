@@ -116,7 +116,7 @@ public sealed class CanonicalIrDictionaryTests
         BinaryPrimitives.WriteUInt32BigEndian(memory.AsSpan(4, 4), 0x4E800020u); // blr
         var image = new ProgramImage(memory,
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, (uint)memory.Length),
-            AddressRange.FromStartAndSize(MemoryLayout.RamBase, (uint)memory.Length), default, "bounded-ir-test");
+            AddressRange.FromStartAndSize(MemoryLayout.RamBase, (uint)memory.Length), "bounded-ir-test");
         var translator = new FunctionTranslator(image);
         var options = TranslationOptions.Default with { PreferredName = "bounded_ir_test" };
         var canonical = translator.Discover(MemoryLayout.RamBase, options).Ssa.Function;

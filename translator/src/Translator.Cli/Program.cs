@@ -7,9 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,13 +19,9 @@ using Translator.Core.Analysis;
 using Translator.Core.Analysis.BasicBlocks;
 using Translator.Core.Disassembly;
 using Translator.Core.Loading;
-using Translator.Core.Mods;
-using Translator.Core.Mods.Mkwii;
 using Translator.Core.Ir;
 using Translator.Core.IO;
-using Translator.Core.Parsing.Kamek;
 using Translator.Core.Parsing.Dol;
-using Translator.Core.Parsing.Rel;
 using Translator.Core.Translation;
 
 // All formats here (YAML, JSON, hex, hashes) are culture-invariant. Under Turkish locale, YamlDotNet's
@@ -40,15 +34,9 @@ var command = args.Length > 0 ? args[0] : "info";
 var (optionValues, enabledFlags, firstCommandArgument, helpRequested, unrecognizedOption) =
     ParseCommandLineOptions(command, args);
 var projectOption = optionValues.GetValueOrDefault("--project");
-var profileOption = optionValues.GetValueOrDefault("--profile");
 var project = !string.IsNullOrWhiteSpace(projectOption)
     ? TranslationProjectConfig.Load(projectOption)
     : null;
-var profile = project?.GetProfile(profileOption);
-if (profile is not null)
-{
-    project!.ValidateProfile(profile);
-}
 // The function map is the project's function-start oracle. Loading it here
 // also publishes the CodeWarrior save/restore thunk ranges, which three static
 // passes (guest ABI contracts, inline-thunk emission, inferred ABI) look up by
@@ -70,15 +58,14 @@ if (unrecognizedOption is not null)
     return 2;
 }
 var dolFile = new Lazy<DolFile>(LoadDol);
-var relFile = new Lazy<RelFile?>(LoadRel);
 var image = new Lazy<ProgramImage>(LoadImage);
 var canonicalIrStore = new CanonicalIrStore();
 // Hoisted out of the translator factory so the base pipeline can prewarm the
-// recursive ABI cache in one stable pass, exactly like translate-mod does.
+// recursive ABI cache in one stable pass.
 var inferredGuestAbi = new Lazy<InferredGuestFunctionAbiProvider>(() =>
     new InferredGuestFunctionAbiProvider(image.Value, canonicalIrStore));
-var runtimeNativeIndex = new Lazy<RuntimeNativeIndex>(() => ResolveRegionalNativeIndex(
-    RequireProject().Runtime.NativeRegistrationRoot, RequireProject().Runtime.NativeIndex));
+var runtimeNativeIndex = new Lazy<RuntimeNativeIndex>(() => RuntimeNativeIndexBuilder.Resolve(
+    RequireProject().Runtime.NativeRegistrationRoot, RequireProject().Runtime.NativeIndex, Console.Error));
 // Void-stub signatures are only trusted as declared guest ABIs when the stub
 // lives under runtime.native_abi_directories (the vetted set); everywhere else
 // the C++ signature is documentation and the inferred ABI stays authoritative.
@@ -121,17 +108,8 @@ var baseTranslationExclusions = new Lazy<IReadOnlySet<uint>>(() =>
         .Where(static registration => registration.ExcludesBaseTranslation)
         .Select(static registration => registration.Address)
         .ToHashSet());
-// The base translation is shared across products, so mod-safety decisions must cover every enabled
-// profile's patch set, not just --profile. The launcher reuses one profile-less base for both vanilla
-// and Retro Rewind; keying on --profile alone let mod-patched callees get leaf-inlined into base
-// callers, baking vanilla code into the modded product (character-select corruption, LinkList panics).
-var modPatchProfiles = new Lazy<IReadOnlyList<Translator.Cli.Configuration.ProjectProfile>>(
-    () => CollectModPatchProfiles(project, profile));
-var modPatchedAddresses = new Lazy<IReadOnlySet<uint>>(() =>
-    BuildModPatchedAddresses(modPatchProfiles.Value));
 var leafInliningBlockedTargets = new Lazy<IReadOnlySet<uint>>(() =>
-    BuildLeafInliningBlockedTargets(
-        modPatchedAddresses.Value, runtimeNativeGuestEffects.Value, baseTranslationExclusions.Value));
+    BuildLeafInliningBlockedTargets(runtimeNativeGuestEffects.Value, baseTranslationExclusions.Value));
 
 // Leaf inlining is a front-end decision: the splice happens before SSA, so the
 // canonical graph the emission wave lowers is already inlined and every
@@ -142,21 +120,10 @@ TranslationOptions WithProjectFrontEndPolicy(
     options with
     {
         AllowUnsupportedInstructions = translation.AllowUnsupportedInstructions,
-        // Splicing a body whose runtime winner is a native registration, a
-        // dropped translation or a Kamek overlay would silently keep executing
-        // the original bytes.
+        // Splicing a body whose runtime winner is a native registration or a
+        // dropped translation would silently keep executing the original bytes.
         LeafInliningBlockedTargets = leafInliningBlockedTargets.Value
     };
-// translate-mod reads the same (large) base metadata from several places.
-var baseMetadataCache = new Dictionary<string, BaseTranslationOutputMetadata>(StringComparer.OrdinalIgnoreCase);
-BaseTranslationOutputMetadata ReadBaseMetadataCached(string path)
-{
-    var fullPath = Path.GetFullPath(path);
-    if (!baseMetadataCache.TryGetValue(fullPath, out var metadata))
-        baseMetadataCache[fullPath] = metadata = BaseTranslationOutputMetadataFile.Read(fullPath);
-    return metadata;
-}
-string? translateModPublishedOutputDirectory = null;
 List<AddressRange>? _executableRanges = null;
 // Callback discovery now runs on the discovery worker pool, so the range cache
 // must be built by exactly one thread and published only once it is complete.
@@ -170,75 +137,13 @@ return command switch
     "info" or "--info" or "--version" => RunInfo(),
     "generate-data-init" => RunGenerateDataInit(),
     "translate-recursive" => RunTranslateRecursive(firstCommandArgument),
-    "translate-mod" => RunTranslateMod(),
     "emit-build-shards" => RunEmitBuildShards(),
     "emit-native-index" => RunEmitNativeIndex(),
-    "emit-base-manifest" => RunEmitBaseManifest(),
-    "check-base-mod-awareness" => RunCheckBaseModAwareness(),
     _ => ShowHelp(command)
 };
 
-/// <summary>
-/// May the workspace's completed base translation be reused for the Code.pul about to build?
-/// Exit 0 = yes, 3 = no, anything else = error (also treat as no). Answering wrong in the permissive
-/// direction bakes vanilla code into a modded product, so every uncertainty exits non-zero.
-/// </summary>
-int RunCheckBaseModAwareness()
-{
-    var metadataPath = optionValues.GetValueOrDefault("--translation-output-metadata")
-        ?? Path.Combine(root, "generated", "base_translation_output.json");
-    var codePul = optionValues.GetValueOrDefault("--code-pul") ?? profile?.CodePul;
-    if (string.IsNullOrWhiteSpace(codePul))
-    {
-        Console.Error.WriteLine("[translator] check-base-mod-awareness needs --code-pul or a profile that has one.");
-        return 1;
-    }
-    if (profile is null)
-    {
-        Console.Error.WriteLine("[translator] check-base-mod-awareness needs --profile.");
-        return 1;
-    }
-    if (!File.Exists(codePul))
-    {
-        Console.Error.WriteLine($"[translator] Code.pul not found: {codePul}");
-        return 1;
-    }
-
-    var awarenessPath = Path.Combine(
-        Path.GetDirectoryName(Path.GetFullPath(metadataPath))!, BaseTranslationModAwareness.FileName);
-    var awareness = BaseTranslationModAwarenessFile.TryRead(awarenessPath);
-    if (awareness is null)
-    {
-        Console.WriteLine(
-            $"[translator] No usable mod-patch awareness detail beside {metadataPath}; the base must retranslate.");
-        return 3;
-    }
-    if (!awareness.CoversCodePul(profile.Name, codePul, out var reason))
-    {
-        Console.WriteLine($"[translator] The base translation cannot be reused for this Code.pul: {reason}.");
-        return 3;
-    }
-    Console.WriteLine(
-        "[translator] This Code.pul patches exactly the translated functions the base translation was " +
-        "built around; the completed base translation stays valid.");
-    return 0;
-}
-
-// The runtime registers natives by PAL address; translated code needs the project region's.
-RuntimeNativeIndex ResolveRegionalNativeIndex(string nativeSourceDirectory, string? indexPath)
-{
-    var index = RuntimeNativeIndexBuilder.Resolve(nativeSourceDirectory, indexPath, Console.Error);
-    var region = GuestRegions.FromGameId(RequireProject().Identity.GameId);
-    var tablePath = GuestAddressTable.DefaultPath(nativeSourceDirectory);
-    // A runtime without a table can only be built for PAL.
-    if (region == GuestRegion.Pal && !File.Exists(tablePath))
-        return index;
-    return index.ForRegion(GuestAddressTable.Load(tablePath), region);
-}
-
 int RunEmitBuildShards()
 {
-    // The project decides the guest region the shards are built for.
     if (project is null)
     {
         Console.Error.WriteLine("emit-build-shards requires --project <path>.");
@@ -249,8 +154,6 @@ int RunEmitBuildShards()
     var output = optionValues.GetValueOrDefault("--out") ?? Path.Combine(root, "generated", "build_shards");
     var nativeSources = optionValues.GetValueOrDefault("--native-source-dir") ?? Path.Combine(root, "runtime", "src");
     var nativeIndexOption = optionValues.GetValueOrDefault("--native-index");
-    var resolvedProfile = optionValues.GetValueOrDefault("--resolved-profile");
-    var retroCpp = optionValues.GetValueOrDefault("--retro-cpp-dir");
 
     try
     {
@@ -262,22 +165,17 @@ int RunEmitBuildShards()
             : Path.GetFullPath(nativeIndexOption);
         if (!Directory.Exists(nativeSourcePath) && !File.Exists(nativeIndexPath))
             throw new DirectoryNotFoundException(nativeSourcePath);
-        var nativeIndex = ResolveRegionalNativeIndex(nativeSourcePath, nativeIndexPath);
+        var nativeIndex = RuntimeNativeIndexBuilder.Resolve(nativeSourcePath, nativeIndexPath, Console.Error);
         var result = TranslatedBuildShardEmitter.Emit(new TranslatedBuildShardOptions(
             Path.GetFullPath(baseMetadata),
             Path.GetFullPath(baseFunctions),
             Path.GetFullPath(output),
             nativeSourcePath,
-            string.IsNullOrWhiteSpace(resolvedProfile) ? null : Path.GetFullPath(resolvedProfile),
-            string.IsNullOrWhiteSpace(retroCpp) ? null : Path.GetFullPath(retroCpp),
-            NativeIndex: nativeIndex,
-            Region: GuestRegions.FromGameId(project.Identity.GameId)));
+            NativeIndex: nativeIndex));
         Console.WriteLine("[translator] emitted stable translated build graph");
         Console.WriteLine($"  base functions: {result.BaseFunctionCount:N0}");
-        Console.WriteLine($"  shared base functions: {result.SharedBaseFunctionCount:N0}");
-        Console.WriteLine($"  profile-sensitive targets/callers: {result.ProfileSensitiveTargetCount:N0}/{result.ProfileSensitiveCallerCount:N0}");
-        Console.WriteLine($"  mod functions: {result.ModFunctionCount:N0}");
-        Console.WriteLine($"  base/mod shards: {result.BaseShardCount:N0}/{result.ModShardCount:N0}");
+        Console.WriteLine($"  active base functions: {result.ActiveBaseFunctionCount:N0}");
+        Console.WriteLine($"  base shards: {result.BaseShardCount:N0}");
         if (result.BaseCommonShardMapPath is { } shardMapPath)
         {
             Console.WriteLine(result.BaseCommonBoundariesReused
@@ -341,9 +239,6 @@ int RunInfo()
         Console.WriteLine($"Project : {project.Identity.DisplayName} ({project.Identity.Id})");
         Console.WriteLine($"Memory  : 0x{project.Memory.Base:X8}+0x{project.Memory.Size:X}");
         Console.WriteLine($"DOL     : {project.Inputs.Dol.Path}");
-        Console.WriteLine(project.Inputs.Rel is null
-            ? "REL     : none"
-            : $"REL     : {project.Inputs.Rel.Path} @ 0x{project.Inputs.Rel.LoadAddress:X8}");
     }
     return 0;
 }
@@ -398,7 +293,7 @@ int RunTranslateRecursive(string? firstCommandArgument)
         // Per translated function: sorted, coalesced [start, endExclusive) pairs of
         // the instruction addresses its own control flow executes (leaf-inlined
         // callees are decoded separately and never appear here). Feeds the
-        // fall-through interior-entry detection for the base manifest.
+        // fall-through interior-entry detection for the output metadata.
         var translatedFlowCoverage = new Dictionary<uint, uint[]>();
         var translatedFunctionEnds = new Dictionary<uint, uint>();
         // Every map entry is a function start, so the whole boundary set is known
@@ -424,7 +319,7 @@ int RunTranslateRecursive(string? firstCommandArgument)
         var residentTranslationExclusions = baseTranslationExclusions.Value;
         Console.WriteLine(
             $"[translator] Leaf inlining: {leafInliningBlockedTargets.Value.Count:N0} address(es) are not " +
-            "inlinable (native, excluded from translation, or mod-patched).");
+            "inlinable (native or excluded from translation).");
 
         var queue = new Queue<(uint addr, int depth)>();
         queue.Enqueue((startAddr, 0));
@@ -452,7 +347,6 @@ int RunTranslateRecursive(string? firstCommandArgument)
             bool AllowUnsupported)>();
         var baseOutputPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         BaseTranslationOutputMetadata? completedOutputMetadata = null;
-        BaseTranslationModAwareness? completedModAwareness = null;
 
         void TrackEmittedPath(string path)
         {
@@ -588,8 +482,8 @@ int RunTranslateRecursive(string? firstCommandArgument)
 
             IndexedParallel.For(batch.Count, parallelOptions, i => Decode(i, findSwallowedSiblings: true));
 
-            // Re-run only translations that swallowed a newly revealed sibling entry, or direct
-            // branches could bypass a mod overlay registered there. The dedup filter keeps first sighting.
+            // Re-run only translations that swallowed a newly revealed sibling entry, so every function
+            // stops at the final boundary set. The dedup filter keeps first sighting.
             var newlyKnownEntries = Enumerable.Range(0, batch.Count)
                 .Where(i => metrics[i] is not null)
                 .SelectMany(i => discoveryTargets[i].Concat(swallowedSiblingEntries[i]))
@@ -812,10 +706,9 @@ int RunTranslateRecursive(string? firstCommandArgument)
             LogPhase("boundary repair");
 
             // Entries another translation's own flow executes through. Branch
-            // targets surface as block labels and are excluded downstream by the
-            // manifest builder's label rule; this catches the label-less
+            // targets surface as block labels; this catches the label-less
             // fall-through case (e.g. a function map's split-switch artifact),
-            // which must not split the patch-homing base function ranges.
+            // which the output metadata marks as interior to another translation.
             var interiorEntryPoints = ComputeInteriorEntryPoints(translatedFlowCoverage);
 
             {
@@ -954,17 +847,6 @@ int RunTranslateRecursive(string? firstCommandArgument)
             // Residency, boundary narrowing and the stack elisions all come from
             // WithProjectCodegenPolicy below, which every emitting path shares.
             var residentPolicy = RequireProject().Translation;
-            // A Kamek write into a translated function makes a mod overlay its runtime winner, with
-            // effects this liveness pass never computed, so callers need the full residency fence.
-            // Only raw patch addresses are needed here since the base manifest doesn't exist yet.
-            var modOverridableCallTargets = BuildModOverridableCallTargets(
-                modPatchedAddresses.Value, translatedFunctionEnds);
-            if (modOverridableCallTargets.Count != 0)
-            {
-                Console.WriteLine(
-                    $"[translator] Mod-overridable direct-call targets: {modOverridableCallTargets.Count:N0} " +
-                    "function(s) keep the full residency boundary.");
-            }
             var directlyCalledGuestFunctions = localGuestAbiContracts.Values
                 .SelectMany(static contract => contract.DirectCallTargets)
                 .Where(localGuestAbiContracts.ContainsKey)
@@ -1109,10 +991,8 @@ int RunTranslateRecursive(string? firstCommandArgument)
                         StateFreeAbiContracts: stateFreeAbiContracts,
                         StateFreeCallSymbols: stateFreeCallSymbols,
                         StateFreeCallSiteVariants: stateFreeCallSiteVariantsByCaller.GetValueOrDefault(address),
-                         StateFreeEntryVariants: stateFreeEntryVariantsByTarget.GetValueOrDefault(address),
-                         ModOverridableCallTargets: modOverridableCallTargets),
-                    residentPolicy,
-                    address);
+                        StateFreeEntryVariants: stateFreeEntryVariantsByTarget.GetValueOrDefault(address)),
+                    residentPolicy);
             }
 
             // Populate the recursive ABI inference cache once, in stable global order, before
@@ -1462,17 +1342,7 @@ int RunTranslateRecursive(string? firstCommandArgument)
                         metadataUnsupportedInstructionCount,
                         InvalidSsaFunctionCount: 0),
                     null,
-                    bundleReference,
-                    BuildModPatchAwareness(modPatchProfiles.Value));
-                // The digest stamp above answers "was this exact Code.pul present?". This record
-                // answers the question that actually decides reuse - "would a different Code.pul
-                // have changed anything here?" - by keeping the translated function ranges beside
-                // the patched addresses that landed inside them.
-                completedModAwareness = BaseTranslationModAwareness.Create(
-                    null,
-                    completedOutputMetadata.Functions.Count,
-                    BuildModPatchAwarenessDetail(modPatchProfiles.Value),
-                    translatedFunctionEnds);
+                    bundleReference);
             }
         }
 
@@ -1505,14 +1375,6 @@ int RunTranslateRecursive(string? firstCommandArgument)
                 ? $"[translator] Updated base translation metadata: {outputMetadataPath}"
                 : $"[translator] Base translation metadata unchanged: {outputMetadataPath}");
         }
-        if (completedModAwareness is not null)
-        {
-            var awarenessPath = Path.Combine(
-                Path.GetDirectoryName(Path.GetFullPath(outputMetadataPath!))!,
-                BaseTranslationModAwareness.FileName);
-            BaseTranslationModAwarenessFile.WriteIfChangedAtomic(awarenessPath, completedModAwareness);
-            Console.WriteLine($"[translator] Recorded mod-patch awareness detail: {awarenessPath}");
-        }
         Console.WriteLine($"[translator] File writes: {filesUpdated} updated, {filesUnchanged} unchanged.");
     }
     catch (Exception ex)
@@ -1533,1152 +1395,12 @@ int RunTranslateRecursive(string? firstCommandArgument)
     return 0;
 }
 
-int RunTranslateMod()
-{
-    var outDir = optionValues.GetValueOrDefault("--out") ?? profile?.Output;
-    if (string.IsNullOrWhiteSpace(outDir))
-    {
-        return RunTranslateModCore(null);
-    }
-
-    var publishedOutput = Path.GetFullPath(outDir);
-    var previousPublishedOutput = translateModPublishedOutputDirectory;
-    translateModPublishedOutputDirectory = publishedOutput;
-    try
-    {
-        var result = TransactionalDirectoryOutput.GenerateAndPublish(
-            publishedOutput,
-            RunTranslateModCore,
-            (stagingDirectory, exitCode) => PreserveTranslateModFailureDiagnostics(
-                stagingDirectory,
-                publishedOutput,
-                exitCode));
-        foreach (var warning in result.Warnings)
-        {
-            Console.Error.WriteLine($"[translator] Warning: {warning}");
-        }
-        if (result.Publication is { } publication)
-        {
-            Console.WriteLine(
-                $"[translator] published mod output: {publication.AddedFiles:N0} added, " +
-                $"{publication.UpdatedFiles:N0} updated, {publication.RemovedFiles:N0} removed, " +
-                $"{publication.UnchangedFiles:N0} unchanged");
-        }
-        return result.ExitCode;
-    }
-    finally
-    {
-        translateModPublishedOutputDirectory = previousPublishedOutput;
-    }
-}
-
-void PreserveTranslateModFailureDiagnostics(string stagingDirectory, string publishedOutput, int exitCode)
-{
-    var diagnosticsDirectory = publishedOutput + ".failed";
-    if (Directory.Exists(diagnosticsDirectory))
-    {
-        Directory.Delete(diagnosticsDirectory, recursive: true);
-    }
-    Directory.CreateDirectory(diagnosticsDirectory);
-
-    var copied = 0;
-    foreach (var source in Directory.EnumerateFiles(stagingDirectory, "*", SearchOption.TopDirectoryOnly)
-                 .Where(path => path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
-                                path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
-    {
-        File.Copy(source, Path.Combine(diagnosticsDirectory, Path.GetFileName(source)), overwrite: true);
-        copied++;
-    }
-    File.WriteAllText(
-        Path.Combine(diagnosticsDirectory, "failure.txt"),
-        $"translate-mod exited with code {exitCode}. Preserved {copied} top-level diagnostic file(s).{Environment.NewLine}");
-    Console.Error.WriteLine($"[translator] Preserved failure diagnostics: {diagnosticsDirectory}");
-}
-
-int RunTranslateModCore(string? outputDirectoryOverride)
-{
-    // Wall-clock accounting mirroring RunTranslateRecursive's LogPhase output.
-    var modPhaseStart = DateTime.Now;
-    var modLastPhaseSeconds = 0d;
-    void LogModPhase(string label)
-    {
-        var now = (DateTime.Now - modPhaseStart).TotalSeconds;
-        Console.WriteLine($"[translator] mod phase '{label}': {now - modLastPhaseSeconds:F1}s (t={now:F1}s)");
-        modLastPhaseSeconds = now;
-    }
-
-    var codePul = optionValues.GetValueOrDefault("--code-pul") ?? profile?.CodePul;
-    var baseManifestPath = optionValues.GetValueOrDefault("--base-manifest");
-    var outDir = outputDirectoryOverride ?? optionValues.GetValueOrDefault("--out") ?? profile?.Output;
-    if (string.IsNullOrWhiteSpace(codePul) ||
-        string.IsNullOrWhiteSpace(baseManifestPath) ||
-        string.IsNullOrWhiteSpace(outDir))
-    {
-        WriteUsage(Console.Error, new[] { "translate-mod" });
-        return 1;
-    }
-
-    var modRoot = optionValues.GetValueOrDefault("--mod-root") ?? profile?.ModRoot;
-    var baseTranslationOutputMetadataPath = optionValues.GetValueOrDefault("--base-translation-output-metadata")
-        ?? Path.Combine(root, "generated", "base_translation_output.json");
-    // The base translation bakes mod-safety decisions (leaf-inlining blocks, residency fences)
-    // around the patch set it knew about; a base tree that never saw this Code.pul can splice
-    // mod-patched callee bodies inline, silently running vanilla code where the mod's hooks must
-    // win (this shipped once as a character-select LinkList.h:573 panic).
-    if (File.Exists(baseTranslationOutputMetadataPath) && File.Exists(codePul))
-    {
-        var guardedBaseMetadata = ReadBaseMetadataCached(baseTranslationOutputMetadataPath);
-        var codePulSha256 = ChecksumUtilities.Sha256HexOfFile(codePul);
-        var baseKnowsThisPul = guardedBaseMetadata.ModPatchAwareness is { } awareness &&
-            awareness.Any(entry => string.Equals(entry.CodePulSha256, codePulSha256, StringComparison.OrdinalIgnoreCase));
-        // A different Code.pul is not automatically a different base translation. The decisions the
-        // stamp above protects are made from the patched addresses alone, so a pul that patches the
-        // same translated functions produces the same base tree - and the awareness record beside
-        // the metadata is what proves that, address by address.
-        if (!baseKnowsThisPul && profile is not null)
-        {
-            var awarenessDetail = BaseTranslationModAwarenessFile.TryRead(Path.Combine(
-                Path.GetDirectoryName(Path.GetFullPath(baseTranslationOutputMetadataPath))!,
-                BaseTranslationModAwareness.FileName));
-            if (awarenessDetail is not null &&
-                awarenessDetail.TranslatedFunctionCount == guardedBaseMetadata.Functions.Count)
-            {
-                if (awarenessDetail.CoversCodePul(profile.Name, codePul, out var mismatch))
-                {
-                    Console.WriteLine(
-                        "[translator] The base translation predates this Code.pul but patches the same " +
-                        "translated functions, so its mod-safety decisions still hold.");
-                    baseKnowsThisPul = true;
-                }
-                else
-                {
-                    Console.Error.WriteLine(
-                        $"[translator] The base translation cannot be reused for this Code.pul: {mismatch}.");
-                }
-            }
-        }
-        if (!baseKnowsThisPul)
-        {
-            Console.Error.WriteLine(
-                $"[translator] The base translation ({baseTranslationOutputMetadataPath}) was produced without " +
-                $"awareness of this mod's Code.pul (sha256 {codePulSha256}). Its leaf-inlining and residency " +
-                "decisions may bypass the mod's patches, which silently breaks the modded product. " +
-                "Retranslate the base with this mod's Code.pul present (it is picked up automatically from " +
-                "every enabled project profile), then re-run translate-mod.");
-            return 1;
-        }
-    }
-    else if (!File.Exists(baseTranslationOutputMetadataPath))
-    {
-        Console.Error.WriteLine(
-            $"[translator] Warning: no base translation output metadata at {baseTranslationOutputMetadataPath}; " +
-            "cannot verify the base translation is aware of this mod's patch set.");
-    }
-    var modName = optionValues.GetValueOrDefault("--mod-name")
-        ?? (!string.IsNullOrWhiteSpace(modRoot) ? Path.GetFileName(Path.GetFullPath(modRoot)) : "Pulsar Mod");
-    var region = optionValues.GetValueOrDefault("--region") ?? profile?.Region ?? "P";
-    if (project?.Identity.Region is { } projectRegion &&
-        !string.Equals(region, projectRegion, StringComparison.OrdinalIgnoreCase))
-    {
-        Console.Error.WriteLine($"[translator] --region {region} does not match the project's region {projectRegion}.");
-        return 1;
-    }
-    var moduleGuestBase = optionValues.GetValueOrDefault("--module-guest-base") is { } moduleBaseText
-        ? ParseAddress(moduleBaseText)
-        : profile?.ModuleGuestBase ?? 0x81700000u;
-    var moduleLinkBaseText = optionValues.GetValueOrDefault("--module-link-base");
-    var moduleLinkBase = moduleLinkBaseText is not null
-        ? ParseAddress(moduleLinkBaseText)
-        : profile?.ModuleLinkBase ?? 0x803992E0u;
-    Directory.CreateDirectory(outDir);
-
-    var pul = KamekPulFile.Load(codePul);
-    var selected = pul.SelectRegion(region);
-    // The server validates the hash of the unmodified chunk.
-    var sourceKamekCodeSha1 = SHA1.HashData(selected.CodeBlob);
-    if (string.Equals(profile?.Name, "retro-rewind", StringComparison.OrdinalIgnoreCase))
-    {
-        var corrected = pul.IsCombined && !string.Equals(region, "P", StringComparison.OrdinalIgnoreCase)
-            ? RetroRewindRegionPatches.CorrectUnportedUsHooks(selected, pul.SelectRegion("P"), project?.Identity.GameId, image.Value)
-            : selected;
-        if (!ReferenceEquals(corrected, selected))
-            Console.WriteLine("[translator] Moved Retro Rewind's unported PAL vtable hooks to their NTSC-U slots.");
-        var esrb = RetroRewindRegionPatches.ApplyUsEsrbSkip(corrected, project?.Identity.GameId, image.Value);
-        if (!ReferenceEquals(esrb, corrected))
-            Console.WriteLine("[translator] Applied Retro Rewind's NTSC-U ESRB skip statically at 0x80604094.");
-        selected = esrb;
-    }
-    var baseManifest = JsonSerializer.Deserialize<BaseManifest>(File.ReadAllText(baseManifestPath))
-        ?? throw new InvalidDataException($"Failed to parse base manifest: {baseManifestPath}");
-
-    var patchPlan = KamekPatchPlanner.Build(selected, baseManifest, moduleGuestBase);
-    var continuationPlan = ContinuationPlanner.Build(selected, baseManifest, moduleGuestBase);
-
-    if (patchPlan.Unsupported.Any())
-    {
-        Console.Error.WriteLine("[translator] translate-mod failed: Code.pul has unsupported commands.");
-        Console.Error.WriteLine(patchPlan.BuildTextReport("Code.pul patch classification"));
-        return 2;
-    }
-
-    var droppedReservedWrites = patchPlan.DroppedReservedRegionWrites.Count();
-    if (droppedReservedWrites > 0)
-    {
-        Console.WriteLine(
-            $"[translator] Dropped {droppedReservedWrites} Code.pul write(s) to the WFC codehandler probe word " +
-            "(0x80001920); the recomp keeps it clean so the WFC anticheat probe reads an untouched console.");
-    }
-
-    var baseManifestDirectory = Path.GetDirectoryName(Path.GetFullPath(baseManifestPath))!;
-
-    var overlayBuild = OverlayFunctionBuilder.BuildAndWrite(
-        selected,
-        baseManifest,
-        patchPlan,
-        baseManifestDirectory,
-        outDir);
-
-    var relocatedModuleImagePath = Path.Combine(outDir, "overlay_images", overlayBuild.ModuleImageFile);
-    var relocatedModuleImage = File.ReadAllBytes(relocatedModuleImagePath);
-
-    continuationPlan = ContinuationPlanner.AddModuleTailJumpContinuations(
-        continuationPlan,
-        baseManifest,
-        moduleGuestBase,
-        relocatedModuleImage);
-
-    var discoveredKamekFunctionStarts = ModFunctionDiscovery.DiscoverKamekFunctions(
-        selected,
-        moduleGuestBase,
-        relocatedModuleImage);
-    var kamekFunctionStarts = discoveredKamekFunctionStarts
-        .GroupBy(s => s.Address)
-        .Select(g => new ModFunctionStart(g.Key, string.Join("; ", g.Select(s => s.Reason).Distinct(StringComparer.Ordinal))))
-        .OrderBy(s => s.Address)
-        .ToList();
-    var cppFailureCount = 0;
-    var emitCpp = enabledFlags.Contains("--emit-cpp");
-    var maxThreads = optionValues.GetValueOrDefault("--threads") is { } threadsText
-        ? Math.Max(1, ParseInt(threadsText))
-        : Math.Max(1, Environment.ProcessorCount);
-    LogModPhase("setup + patch planning");
-    if (emitCpp)
-    {
-        var nonReturningModuleCallTargets = FindNonReturningModuleCallTargets(
-            continuationPlan,
-            kamekFunctionStarts,
-            moduleGuestBase,
-            checked(overlayBuild.ModuleGuestBase + (uint)relocatedModuleImage.Length));
-        cppFailureCount = EmitModCpp(
-            outDir,
-            baseManifest,
-            overlayBuild,
-            continuationPlan,
-            patchPlan,
-            kamekFunctionStarts,
-            moduleLinkBase,
-            selected.CodeSize,
-            nonReturningModuleCallTargets,
-            maxThreads);
-    }
-
-    LogModPhase("mod C++ emission");
-    var dvdOverlayRoots = ModDvdOverlayRoots.Discover(modRoot);
-    var riivolutionOptions = profile?.Riivolution?.Options
-        .Select(option => new ModRiivolutionOption(option.Section, option.Option, option.Choice))
-        .ToList();
-    var emitFullInitializerSet = emitCpp &&
-        cppFailureCount == 0;
-    ModDataPatchWriter.Write(
-        Path.Combine(outDir, "cpp", "mod_data_patches.cpp"),
-        patchPlan,
-        moduleLinkBase,
-        baseManifest,
-        dvdOverlayRoots,
-        relocatedModuleImage,
-        sourceKamekCodeSha1,
-        selected.CodeSize,
-        selected.BssSize,
-        checked(moduleGuestBase + selected.CtorStart),
-        checked(moduleGuestBase + selected.CtorEnd),
-        emitFullInitializerSet,
-        Path.Combine(
-            translateModPublishedOutputDirectory ?? outDir,
-            "cpp",
-            "mod_data_patches_blobs"),
-        profile?.Riivolution?.Xml,
-        riivolutionOptions);
-
-    if (emitCpp && cppFailureCount == 0)
-    {
-        WriteResolvedDispatchProfile(
-            outDir,
-            RequireProject().Output.Functions,
-            Path.Combine(root, "generated", "functions_manifest.txt"),
-            baseTranslationOutputMetadataPath,
-            Path.Combine(outDir, "cpp"),
-            RequireProject().Runtime.NativeRegistrationRoot,
-            translateModPublishedOutputDirectory ?? outDir);
-    }
-
-    LogModPhase("data patches + dispatch profile");
-    Console.WriteLine("[translator] translate-mod complete");
-    Console.WriteLine($"  mod: {modName}");
-    Console.WriteLine($"  region: {region}");
-    Console.WriteLine($"  module base: 0x{moduleGuestBase:X8}");
-    Console.WriteLine($"  module link base: 0x{moduleLinkBase:X8}");
-    Console.WriteLine($"  module image: overlay_images/{overlayBuild.ModuleImageFile}");
-    Console.WriteLine($"  module patches applied: {overlayBuild.ModulePatchCount:N0}");
-    Console.WriteLine($"  overlay functions: {overlayBuild.OverlayFunctions.Count:N0}");
-    Console.WriteLine($"  continuations: {continuationPlan.Entries.Count:N0}");
-    Console.WriteLine($"  discovered module functions: {kamekFunctionStarts.Count:N0}");
-    Console.WriteLine($"  data patches: {patchPlan.DataPatches.Count():N0}");
-    Console.WriteLine($"  dvd overlay roots: {dvdOverlayRoots.Count:N0}");
-    return overlayBuild.Diagnostics.Count == 0 && cppFailureCount == 0 ? 0 : 3;
-}
-
-void WriteResolvedDispatchProfile(
-    string outDir,
-    string baseFunctionsDir,
-    string baseFunctionsManifest,
-    string baseTranslationOutputMetadataPath,
-    string modCppDir,
-    string runtimeSourceDir,
-    string publishedOutDir)
-{
-    var candidates = new List<ResolvedDispatchEntry>();
-    // The per-function sources carry their registration facts as a
-    // RECOMP_REGISTRATION marker comment (see CxxLinearCodeGenerator); nothing
-    // registers per function at compile time any more.
-    var baseRegistration = GeneratedMarkers.BaseRegistrationPattern();
-    var modRegistration = GeneratedMarkers.ModRegistrationPattern();
-    var nativeRegistration = GeneratedMarkers.NativeFunctionRegistrationPattern();
-    var guestAbiMetadata = GeneratedMarkers.GuestAbiPattern();
-
-    IEnumerable<string> BaseFiles()
-    {
-        if (File.Exists(baseFunctionsManifest))
-        {
-            return File.ReadLines(baseFunctionsManifest)
-                .Where(line => !string.IsNullOrWhiteSpace(line))
-                .Select(line => Path.IsPathRooted(line) ? line : Path.Combine(baseFunctionsDir, Path.GetFileName(line)));
-        }
-        return Directory.EnumerateFiles(baseFunctionsDir, "*.cpp", SearchOption.AllDirectories);
-    }
-
-    static IEnumerable<(string File, string Text)> ReadFiles(IEnumerable<string> files)
-    {
-        foreach (var file in files)
-            if (File.Exists(file)) yield return (file, File.ReadAllText(file));
-    }
-
-    IEnumerable<(string File, string Text)> BaseSources()
-    {
-        var metadataPath = baseTranslationOutputMetadataPath;
-        if (File.Exists(metadataPath))
-        {
-            var metadata = ReadBaseMetadataCached(metadataPath);
-            if (!string.IsNullOrWhiteSpace(metadata.SourceBundlePath))
-            {
-                var bundlePath = Path.IsPathRooted(metadata.SourceBundlePath)
-                    ? metadata.SourceBundlePath
-                    : Path.Combine(Path.GetDirectoryName(metadataPath)!, metadata.SourceBundlePath);
-                foreach (var entry in TranslationSourceBundle.Read(bundlePath).Entries)
-                    yield return (Path.Combine(baseFunctionsDir, entry.VirtualPath), entry.Source);
-                yield break;
-            }
-        }
-        foreach (var source in ReadFiles(BaseFiles())) yield return source;
-    }
-
-    IEnumerable<(string File, string Text)> ModSources()
-    {
-        var bundlePath = Path.Combine(Path.GetDirectoryName(modCppDir)!, "translated_sources.bin");
-        if (File.Exists(bundlePath))
-        {
-            foreach (var entry in TranslationSourceBundle.Read(bundlePath).Entries)
-                yield return (Path.Combine(modCppDir, entry.VirtualPath), entry.Source);
-            yield break;
-        }
-        foreach (var source in ReadFiles(Directory.EnumerateFiles(modCppDir, "*.cpp", SearchOption.AllDirectories)))
-            yield return source;
-    }
-
-    void ReadTranslated(
-        IEnumerable<(string File, string Text)> sources,
-        Regex regex,
-        string kind,
-        uint defaultPriority,
-        Func<string, string>? sourceFileMapper = null)
-    {
-        foreach (var (file, text) in sources)
-        {
-            var abi = guestAbiMetadata.Match(text);
-            uint AbiHex(string group, uint fallback = uint.MaxValue) => abi.Success
-                ? uint.Parse(abi.Groups[group].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture)
-                : fallback;
-            foreach (Match match in regex.Matches(text))
-            {
-                var address = GuestTargetParser.ParseHexAddress(match.Groups["address"].Value);
-                var publicSymbol = match.Groups["symbol"].Value;
-                var symbol = publicSymbol;
-                var nameGroup = match.Groups["name"];
-                var priorityGroup = match.Groups["priority"];
-                var priority = priorityGroup.Success
-                    ? uint.Parse(priorityGroup.Value, CultureInfo.InvariantCulture)
-                    : defaultPriority;
-                var preserves = bool.Parse(match.Groups["preserves"].Value);
-                var fprMask = GuestTargetParser.ParseHexAddress(match.Groups["mask"].Value);
-                candidates.Add(new ResolvedDispatchEntry(
-                    address, symbol, nameGroup.Success ? nameGroup.Value : publicSymbol, kind, priority,
-                    true, AbiHex("gr"), AbiHex("gw"), AbiHex("gw"), AbiHex("gret", 0),
-                    AbiHex("fr"), AbiHex("fw"), AbiHex("fret", 0),
-                    (byte)AbiHex("crr", byte.MaxValue), (byte)AbiHex("crw", byte.MaxValue),
-                    !abi.Success || abi.Groups["xr"].Value == "1",
-                    !abi.Success || abi.Groups["xw"].Value == "1",
-                    !abi.Success || abi.Groups["fence"].Value == "1",
-                    preserves, fprMask, true, sourceFileMapper?.Invoke(file) ?? Path.GetFullPath(file)));
-            }
-        }
-    }
-
-    // Every fact the base half of this profile needs - entry point, registration
-    // symbol, non-volatile FPR facts and the guest ABI marker - is already in the
-    // translator-owned output metadata. Re-reading and regex-scanning ~200 MiB of
-    // generated C++ to recover them was pure duplicated work. The bundle scan
-    // stays as the fallback for metadata written before build facts existed.
-    void ReadBaseTranslated()
-    {
-        BaseTranslationOutputMetadata? metadata = null;
-        if (File.Exists(baseTranslationOutputMetadataPath))
-        {
-            metadata = ReadBaseMetadataCached(baseTranslationOutputMetadataPath);
-        }
-        if (metadata is null || metadata.Functions.Any(static function => function.Build is null))
-        {
-            ReadTranslated(BaseSources(), baseRegistration, "base", 0);
-            return;
-        }
-
-        foreach (var function in metadata.Functions)
-        {
-            var build = function.Build!;
-            // The marker text is identical to the `// RECOMP_GUEST_ABI ...` line
-            // the emitter writes into the source, so the same pattern and the
-            // same missing-metadata fallbacks apply.
-            var abi = guestAbiMetadata.Match(build.GuestAbiComment ?? string.Empty);
-            uint AbiHex(string group, uint fallback = uint.MaxValue) => abi.Success
-                ? uint.Parse(abi.Groups[group].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture)
-                : fallback;
-            candidates.Add(new ResolvedDispatchEntry(
-                function.EntryPoint, build.Symbol, build.Symbol, "base", 0,
-                true, AbiHex("gr"), AbiHex("gw"), AbiHex("gw"), AbiHex("gret", 0),
-                AbiHex("fr"), AbiHex("fw"), AbiHex("fret", 0),
-                (byte)AbiHex("crr", byte.MaxValue), (byte)AbiHex("crw", byte.MaxValue),
-                !abi.Success || abi.Groups["xr"].Value == "1",
-                !abi.Success || abi.Groups["xw"].Value == "1",
-                !abi.Success || abi.Groups["fence"].Value == "1",
-                build.PreservesNonvolatileFprs, build.NonvolatileFprWriteMask, true,
-                Path.GetFullPath(Path.Combine(baseFunctionsDir, function.RelativePath))));
-        }
-    }
-
-    ReadBaseTranslated();
-    ReadTranslated(
-        ModSources(),
-        modRegistration,
-        "rr",
-        100,
-        file => Path.GetFullPath(Path.Combine(
-            publishedOutDir,
-            "cpp",
-            Path.GetRelativePath(modCppDir, file))));
-
-    void AddNative(uint address, string symbol, string sourceFile)
-    {
-        candidates.Add(new ResolvedDispatchEntry(
-            address,
-            symbol,
-            symbol,
-            "native", 10000, false,
-            0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0x00000018u,
-            0xFFFFFFFFu, 0xFFFFFFFFu, 0x00000002u,
-            byte.MaxValue, byte.MaxValue, true, true, true,
-            false, 0xFFFFC000u, true, Path.GetFullPath(sourceFile)));
-    }
-
-    // Generated mod support sources can own native winners too. Keep these in
-    // the same resolved profile as runtime-native registrations so direct-call
-    // traits and immutable indirect dispatch tables cannot bypass them.
-    var modDataPatchesPath = Path.Combine(modCppDir, "mod_data_patches.cpp");
-    if (File.Exists(modDataPatchesPath))
-    {
-        var text = Regex.Replace(File.ReadAllText(modDataPatchesPath), @"//[^\r\n]*", string.Empty);
-        foreach (Match match in nativeRegistration.Matches(text))
-        {
-            AddNative(
-                GuestTargetParser.ParseHexAddress(match.Groups["address"].Value),
-                match.Groups["symbol"].Value,
-                modDataPatchesPath);
-        }
-    }
-
-    foreach (var registration in runtimeNativeIndex.Value.Registrations
-                 .Where(static registration => !registration.IsTranslatedOverride))
-    {
-        AddNative(
-            registration.Address,
-            registration.Symbol,
-            Path.Combine(runtimeSourceDir, registration.SourceFile));
-    }
-
-    var indirectTargets = CollectDataSectionFunctionPointerTargets();
-    candidates = candidates
-        .Select(entry => entry with
-        {
-            MustRemainDynamicallyDispatchable = entry.Kind == "native" ||
-                                                entry.Address >= 0x81700000u ||
-                                                indirectTargets.Contains(entry.Address)
-        })
-        .ToList();
-
-    static int KindRank(string kind) => kind switch { "native" => 2, "rr" => 1, _ => 0 };
-    var groups = candidates.GroupBy(entry => entry.Address).ToArray();
-    var resolved = groups
-        .Select(group => group
-            .OrderByDescending(entry => entry.Priority)
-            .ThenByDescending(entry => KindRank(entry.Kind))
-            .First())
-        .OrderBy(entry => entry.Address)
-        .ToArray();
-
-    // A native registration always outranks a mod overlay at the same address, deliberately for
-    // functions the runtime must own (hardware, the strap scene). But when the mod's whole point
-    // is replacing that function, e.g. Retro Rewind's DVDOpen override at 0x8015E2BC, the overlay
-    // is silently dropped. Name every such address so the tradeoff is a choice, not an accident.
-    // Wrapper natives still run the overlay, and replacement natives already made that choice.
-    var nativesKeepingModOverlayDecision = runtimeNativeIndex.Value.Registrations
-        .Where(static registration => registration.ModOverlay != NativeModOverlay.Unspecified)
-        .Select(static registration => (registration.Address, registration.Symbol))
-        .ToHashSet();
-    var nativeOverriddenModPatches = groups
-        .Where(group =>
-        {
-            var winner = group.OrderByDescending(entry => entry.Priority)
-                .ThenByDescending(entry => KindRank(entry.Kind))
-                .First();
-            return group.Any(entry => entry.Kind == "rr") &&
-                   winner.Kind == "native" &&
-                   !nativesKeepingModOverlayDecision.Contains((winner.Address, winner.Symbol));
-        })
-        .Select(group => new
-        {
-            Address = group.Key,
-            Native = group.First(entry => entry.Kind == "native").Symbol,
-            NativeSource = group.First(entry => entry.Kind == "native").SourceFile,
-            Mod = group.First(entry => entry.Kind == "rr").Name
-        })
-        .OrderBy(entry => entry.Address)
-        .ToArray();
-
-    foreach (var collision in nativeOverriddenModPatches)
-    {
-        Console.WriteLine(
-            $"[translator] WARNING: mod overlay for 0x{collision.Address:X8} ({collision.Mod}) is " +
-            $"overridden by native {collision.Native} ({collision.NativeSource}); the mod's patch " +
-            "at that address will not run.");
-    }
-    if (nativeOverriddenModPatches.Length != 0)
-    {
-        Console.WriteLine(
-            $"[translator] {nativeOverriddenModPatches.Length} mod overlay(s) lost to native registrations; " +
-            "see resolved_dispatch_profile.json -> NativeOverriddenModPatches.");
-    }
-
-    JsonOutput.WriteIfChanged(
-        Path.Combine(outDir, "resolved_dispatch_profile.json"),
-        new
-        {
-            Format = "mkwii-resolved-dispatch-profile",
-            FormatVersion = 1,
-            NativeOverriddenModPatches = nativeOverriddenModPatches,
-            Entries = resolved
-        },
-        JsonOutput.Indented);
-
-    Console.WriteLine($"[translator] resolved dispatch profile: {resolved.Length:N0} winning address(es)");
-}
-
-int EmitModCpp(
-    string outDir,
-    BaseManifest baseManifest,
-    OverlayBuildResult overlayBuild,
-    ContinuationPlan continuationPlan,
-    KamekPatchPlan patchPlan,
-    IReadOnlyList<ModFunctionStart> kamekFunctionStarts,
-    uint moduleLinkBase,
-    uint moduleLinkedCodeSize,
-    IReadOnlySet<uint> nonReturningCallTargets,
-    int maxThreads)
-{
-    var modImage = BuildSyntheticModProgramImage(outDir, overlayBuild);
-    var inferredAbi = new InferredGuestFunctionAbiProvider(modImage);
-    var abiProvider = declaredNativeAbi.Value is { } nativeAbi
-        ? new CompositeGuestFunctionAbiProvider(nativeAbi, inferredAbi)
-        : new CompositeGuestFunctionAbiProvider(inferredAbi);
-    var modTranslator = new FunctionTranslator(modImage, abiProvider);
-    var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = maxThreads };
-    // Each wave drains its whole queue: a wave is a barrier that publishes newly discovered
-    // entries, and draining everything makes the output independent of any wave size.
-    Console.WriteLine($"  translating mod C++ with up to {maxThreads} worker thread(s)");
-
-    var cppRoot = Path.Combine(outDir, "cpp");
-    if (Directory.Exists(cppRoot))
-    {
-        Directory.Delete(cppRoot, recursive: true);
-    }
-    Directory.CreateDirectory(cppRoot);
-    var bundledModSources = new Dictionary<string, TranslationSourceBundleEntry>(StringComparer.OrdinalIgnoreCase);
-
-    var unresolved = new List<string>();
-    var translated = 0;
-    var baseFunctions = new BaseFunctionIndex(baseManifest.Functions);
-    var knownFunctionEntryPoints = baseManifest.Functions
-        .Select(f => f.Start)
-        .Concat(kamekFunctionStarts.Select(s => s.Address))
-        .ToHashSet();
-    var queuedContinuationAddresses = continuationPlan.Entries.Select(e => e.Address).ToHashSet();
-    var discoveredContinuationQueue = new Queue<ContinuationEntry>();
-    var hookLrBases = new List<(uint TargetAddress, uint ContinuationAddress)>();
-    var hookLrAnalysis = new Dictionary<uint, LrContinuationAnalysis>();
-    var hookDiscoveryCache = new Dictionary<uint, IReadOnlyList<PpcInstruction>>();
-    IReadOnlyList<PpcInstruction> DiscoverHookBody(uint target)
-    {
-        if (!hookDiscoveryCache.TryGetValue(target, out var instructions))
-        {
-            instructions = modTranslator.Discover(target,
-                new TranslationOptions(KnownFunctionEntryPoints: knownFunctionEntryPoints)).Instructions;
-            hookDiscoveryCache.Add(target, instructions);
-        }
-        return instructions;
-    }
-
-    LrContinuationAnalysis AnalyzeHook(uint target)
-    {
-        if (!hookLrAnalysis.TryGetValue(target, out var analysis))
-        {
-            analysis = LrContinuationAnalysis.Analyze(target, DiscoverHookBody);
-            hookLrAnalysis.Add(target, analysis);
-        }
-        return analysis;
-    }
-
-    foreach (var patch in patchPlan.ExecutablePatches.Where(p => p.CommandId == KamekCommandId.BranchLink && p.Arguments.Count > 0))
-    {
-        var target = KamekAddress.Resolve(patch.Arguments[0], patchPlan.ModuleGuestBase);
-        if (!AnalyzeHook(target).MaySkipReturn)
-        {
-            continue;
-        }
-
-        hookLrBases.Add((target, checked(patch.CommandAddress + 4u)));
-    }
-
-    var linkedHookLrBasesByTarget = hookLrBases
-        .GroupBy(h => h.TargetAddress)
-        .ToDictionary(
-            g => g.Key,
-            g => g.Select(h => h.ContinuationAddress).Distinct().ToArray());
-    var lrContinuationCallTargets = linkedHookLrBasesByTarget.Keys.ToHashSet();
-
-    ModTranslationAttempt[] TranslateWave(IReadOnlyList<ModTranslationWork> wave)
-    {
-        // Some dynamically discovered module/continuation waves bypass
-        // ProcessBoundedWaves. Prewarm every parallel emission boundary as a
-        // final deterministic guard; phase-prewarmed entries are cheap hits.
-        ReportAbiPrewarm(inferredAbi.Prewarm(wave.Select(static work => work.Address), maxThreads));
-        return ModTranslationWaveRunner.Translate(() => modTranslator, wave, parallelOptions);
-    }
-
-    void CommitWave(
-        IReadOnlyList<ModTranslationAttempt> attempts,
-        Action<FunctionTranslationResult, ModTranslationWork>? onSuccess = null)
-    {
-        foreach (var attempt in attempts)
-        {
-            if (attempt.Result is null)
-            {
-                unresolved.Add(attempt.Error!);
-                continue;
-            }
-
-            var virtualPath = Path.GetRelativePath(cppRoot, attempt.Work.OutputPath).Replace('\\', '/');
-            bundledModSources[virtualPath] = new TranslationSourceBundleEntry(
-                attempt.Work.Address,
-                virtualPath,
-                attempt.Result.CxxCode);
-            translated++;
-            onSuccess?.Invoke(attempt.Result, attempt.Work);
-        }
-    }
-
-    void ProcessBoundedWaves(
-        IEnumerable<ModTranslationWork> source,
-        Action<FunctionTranslationResult, ModTranslationWork>? onSuccess = null)
-    {
-        var ordered = source
-            .OrderBy(work => work.Address)
-            .ThenBy(work => work.OutputPath, StringComparer.Ordinal)
-            .ToArray();
-        // Populate the recursive ABI cache in a stable global order before any worker emits C++,
-        // so shared closure reuse and cyclic call graphs never depend on thread count, wave size,
-        // or worker order.
-        ReportAbiPrewarm(inferredAbi.Prewarm(ordered.Select(static work => work.Address), maxThreads));
-        // Commit callbacks here only append to the discovered-continuation queue that a later
-        // phase drains, so nothing in this phase reads back its own commits; wave barriers would
-        // only cost idle workers, so it runs as one parallel batch and the runner re-sorts by the
-        // same key, leaving commit order and the emitted bundle unchanged.
-        CommitWave(TranslateWave(ordered), onSuccess);
-    }
-
-    void RecordDiscoveredBaseContinuations(FunctionTranslationResult result, string reason)
-    {
-        var targets = DiscoverTranslationTargets(result)
-            .Concat(DiscoverCallbackTargets(result, argumentRegisters, requireFunctionStart: false))
-            .Distinct();
-
-        foreach (var target in targets)
-        {
-            var section = baseManifest.Sections.FirstOrDefault(s => target >= s.GuestStart && target < s.GuestEnd);
-            if (section is null || !section.Executable)
-            {
-                continue;
-            }
-
-            var containing = baseFunctions.FindContaining(target);
-            if (containing is null || containing.Start == target)
-            {
-                continue;
-            }
-
-            if (!queuedContinuationAddresses.Add(target))
-            {
-                continue;
-            }
-
-            discoveredContinuationQueue.Enqueue(new ContinuationEntry(
-                target,
-                containing.Start,
-                containing.End,
-                section.Name,
-                result.EntryPoint,
-                KamekCommandId.Write32,
-                reason));
-        }
-    }
-
-    void RecordHookContinuations(uint hookTarget, IReadOnlyList<uint> lrBases)
-    {
-        var analysis = AnalyzeHook(hookTarget);
-        foreach (var lrBase in lrBases)
-        {
-            var targets = analysis.Offsets.Select(offset => unchecked(lrBase + (uint)offset));
-            if (analysis.WasTruncated && baseFunctions.FindContaining(lrBase - 4u) is { } caller)
-            {
-                // Unknown offsets can resume at any aligned instruction in this caller.
-                targets = targets.Concat(Enumerable.Range(0, checked((int)((caller.End - caller.Start) / 4)))
-                    .Select(index => caller.Start + (uint)index * 4u));
-            }
-            foreach (var target in targets.Distinct())
-            {
-                var section = baseManifest.Sections.FirstOrDefault(s => target >= s.GuestStart && target < s.GuestEnd);
-                if (section is null || !section.Executable || (target & 3u) != 0)
-                    continue;
-                var containing = baseFunctions.FindContaining(target);
-                if (containing is null || containing.Start == target || !queuedContinuationAddresses.Add(target))
-                    continue;
-
-                discoveredContinuationQueue.Enqueue(new ContinuationEntry(
-                    target,
-                    containing.Start,
-                    containing.End,
-                    section.Name,
-                    hookTarget,
-                    KamekCommandId.Branch,
-                    $"LR-relative hook target 0x{hookTarget:X8}"));
-            }
-        }
-    }
-
-    foreach (var (target, lrBases) in linkedHookLrBasesByTarget)
-        RecordHookContinuations(target, lrBases);
-
-    ModTranslationWork CreateContinuationWork(ContinuationEntry continuation)
-    {
-        var name = $"rr_continue_{continuation.Address:X8}";
-        var options = WithProjectCodegenPolicy(
-            new TranslationOptions(
-                PreferredName: name,
-                MaxInstructions: TranslationOptions.Default.MaxInstructions,
-                MaxBytes: checked((int)(continuation.ContainingFunctionEnd - continuation.Address)),
-                EmitModRegistration: true,
-                ModRegistrationPriority: TranslationOptions.Default.ModRegistrationPriority,
-                ModRegistrationModuleId: 1,
-                NonReturningCallTargets: nonReturningCallTargets,
-                LrContinuationCallTargets: lrContinuationCallTargets,
-                KnownFunctionEntryPoints: knownFunctionEntryPoints),
-            RequireProject().Translation,
-            continuation.Address);
-        return new ModTranslationWork(
-            continuation.Address,
-            options,
-            Path.Combine(cppRoot, "continuations", $"{name}.cpp"));
-    }
-
-    var overlayWorks = overlayBuild.OverlayFunctions.Select(overlay =>
-    {
-        var name = $"rr_overlay_{overlay.Start:X8}";
-        var maxBytes = checked((int)(overlay.End - overlay.Start));
-        if (baseFunctions.FindContaining(overlay.Start) is { } baseFunction &&
-            baseFunction.Start == overlay.Start &&
-            overlay.End < baseFunction.End)
-        {
-            maxBytes = checked((int)(baseFunction.End - overlay.Start));
-        }
-        var options = WithProjectCodegenPolicy(
-            new TranslationOptions(
-                PreferredName: name,
-                MaxInstructions: TranslationOptions.Default.MaxInstructions,
-                MaxBytes: maxBytes,
-                EmitModRegistration: true,
-                ModRegistrationPriority: TranslationOptions.Default.ModRegistrationPriority,
-                ModRegistrationModuleId: 1,
-                NonReturningCallTargets: nonReturningCallTargets,
-                LrContinuationCallTargets: lrContinuationCallTargets,
-                KnownFunctionEntryPoints: knownFunctionEntryPoints),
-            RequireProject().Translation,
-            overlay.Start);
-        return new ModTranslationWork(
-            overlay.Start,
-            options,
-            Path.Combine(cppRoot, "overlays", $"{name}.cpp"));
-    });
-    ProcessBoundedWaves(overlayWorks, (result, work) =>
-        RecordDiscoveredBaseContinuations(result, $"base continuation discovered from overlay 0x{work.Address:X8}"));
-
-    ProcessBoundedWaves(
-        continuationPlan.Entries.Select(CreateContinuationWork),
-        (result, work) => RecordDiscoveredBaseContinuations(
-            result,
-            $"base continuation discovered from continuation 0x{work.Address:X8}"));
-
-    void DrainDiscoveredContinuations()
-    {
-        while (discoveredContinuationQueue.Count > 0)
-        {
-            var wave = QueueBatch.Dequeue(discoveredContinuationQueue, discoveredContinuationQueue.Count)
-                .Select(CreateContinuationWork)
-                .ToArray();
-            CommitWave(TranslateWave(wave), (result, work) =>
-                RecordDiscoveredBaseContinuations(
-                    result,
-                    $"base continuation discovered from continuation 0x{work.Address:X8}"));
-        }
-    }
-
-    DrainDiscoveredContinuations();
-
-    var moduleImagePath = Path.Combine(outDir, "overlay_images", overlayBuild.ModuleImageFile);
-    var moduleEnd = checked(overlayBuild.ModuleGuestBase + (uint)new FileInfo(moduleImagePath).Length);
-    var moduleQueue = new Queue<ModFunctionStart>(kamekFunctionStarts.OrderBy(s => s.Address));
-    var queuedModuleStarts = new HashSet<uint>(kamekFunctionStarts.Select(s => s.Address));
-    var emittedModuleStarts = new HashSet<uint>();
-    while (moduleQueue.Count > 0)
-    {
-        var wave = new List<ModTranslationWork>(moduleQueue.Count);
-        foreach (var start in QueueBatch.Dequeue(
-                     moduleQueue,
-                     moduleQueue.Count,
-                     start => !emittedModuleStarts.Add(start.Address)))
-        {
-            var name = ModuleFunctionName(start.Address);
-            var options = WithProjectCodegenPolicy(
-                new TranslationOptions(
-                    PreferredName: name,
-                    MaxInstructions: TranslationOptions.Default.MaxInstructions,
-                    MaxBytes: 0x10000,
-                    EmitModRegistration: true,
-                    ModRegistrationPriority: TranslationOptions.Default.ModRegistrationPriority,
-                    ModRegistrationModuleId: 1,
-                    NonReturningCallTargets: nonReturningCallTargets,
-                    LrContinuationCallTargets: lrContinuationCallTargets,
-                    KnownFunctionEntryPoints: knownFunctionEntryPoints,
-                    ModuleLinkBase: moduleLinkBase,
-                    ModuleGuestBase: overlayBuild.ModuleGuestBase,
-                    ModuleLinkedCodeSize: moduleLinkedCodeSize),
-                RequireProject().Translation,
-                start.Address);
-            wave.Add(new ModTranslationWork(
-                start.Address,
-                options,
-                Path.Combine(cppRoot, "module", $"{name}.cpp")));
-        }
-
-        if (wave.Count == 0)
-        {
-            continue;
-        }
-
-        var attempts = TranslateWave(wave);
-        var discoveredModuleTargets = attempts
-            .Where(attempt => attempt.Result is not null)
-            .SelectMany(attempt => DirectModuleTargets(
-                    attempt.Result!, overlayBuild.ModuleGuestBase, moduleEnd)
-                .Select(target => (Target: target, Source: attempt.Work.Address)))
-            .GroupBy(item => item.Target)
-            .Select(group => (Target: group.Key, Source: group.Min(item => item.Source)))
-            .OrderBy(item => item.Target)
-            .ToArray();
-        var newlyKnownModuleTargets = new HashSet<uint>();
-        foreach (var (target, source) in discoveredModuleTargets)
-        {
-            if (queuedModuleStarts.Add(target))
-            {
-                newlyKnownModuleTargets.Add(target);
-                knownFunctionEntryPoints.Add(target);
-                moduleQueue.Enqueue(new ModFunctionStart(target, $"direct call from 0x{source:X8}"));
-            }
-        }
-
-        // A target discovered by one worker can be an interior entry swallowed by
-        // another function translated in the same wave. Re-run just those affected
-        // functions after publishing the new boundary, before any output is committed.
-        if (newlyKnownModuleTargets.Count != 0)
-        {
-            var retry = attempts
-                .Where(attempt => attempt.Result is not null &&
-                    attempt.Result.Instructions.Any(instruction =>
-                        instruction.Address != attempt.Work.Address &&
-                        newlyKnownModuleTargets.Contains(instruction.Address)))
-                .Select(attempt => attempt.Work)
-                .ToArray();
-            if (retry.Length != 0)
-            {
-                var replacements = TranslateWave(retry)
-                    .ToDictionary(attempt => attempt.Work.Address);
-                attempts = attempts
-                    .Select(attempt => replacements.TryGetValue(attempt.Work.Address, out var replacement)
-                        ? replacement
-                        : attempt)
-                    .ToArray();
-            }
-        }
-
-        CommitWave(attempts, (result, work) =>
-            RecordDiscoveredBaseContinuations(result, $"base continuation discovered from module 0x{work.Address:X8}"));
-    }
-
-    DrainDiscoveredContinuations();
-
-
-    TranslationSourceBundle.Write(
-        Path.Combine(outDir, "translated_sources.bin"),
-        bundledModSources.Values);
-
-    foreach (var failure in unresolved)
-    {
-        Console.Error.WriteLine($"[translator]   unresolved: {failure}");
-    }
-    Console.WriteLine($"  emitted C++ functions: {translated:N0}");
-    Console.WriteLine($"  C++ translation failures: {unresolved.Count:N0}");
-    return unresolved.Count;
-}
-
-static string ModuleFunctionName(uint address)
-{
-    // Keep the emitted module filename and C++ symbol compact. Kamek map names
-    // can contain complete C++ signatures, which makes MSVC object paths exceed
-    // CMAKE_OBJECT_PATH_MAX. The guest address is already a stable, unique
-    // identity for the translated function and remains useful when inspecting
-    // generated output.
-    return $"rr_kamek_{address:X8}";
-}
-
-ProgramImage BuildSyntheticModProgramImage(string outDir, OverlayBuildResult overlayBuild)
-{
-    var loadedProject = RequireProject();
-    var rel = relFile.Value ?? throw new InvalidOperationException("Kamek mod translation currently requires the project's single configured REL.");
-    var relImage = rel.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    var baseImage = new ProgramImageBuilder().Build(dolFile.Value, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
-    var memory = baseImage.Memory.ToArray();
-
-    CopyFileToGuest(
-        memory,
-        baseImage.MemoryBase,
-        overlayBuild.ModuleGuestBase,
-        Path.Combine(outDir, "overlay_images", overlayBuild.ModuleImageFile));
-
-    foreach (var overlay in overlayBuild.OverlayFunctions)
-    {
-        CopyFileToGuest(
-            memory,
-            baseImage.MemoryBase,
-            overlay.Start,
-            Path.Combine(outDir, "overlay_images", overlay.ImageFile));
-    }
-
-    return new ProgramImage(
-        memory,
-        baseImage.UsedRange,
-        baseImage.DolRange,
-        baseImage.RelRange,
-        baseImage.Sha256 + "+mod",
-        baseImage.MemoryBase);
-}
-
-void CopyFileToGuest(byte[] memory, uint memoryBase, uint guestAddress, string path)
-{
-    var bytes = File.ReadAllBytes(path);
-    if (guestAddress < memoryBase)
-    {
-        throw new InvalidDataException($"Mod image '{path}' at 0x{guestAddress:X8} precedes configured memory base 0x{memoryBase:X8}.");
-    }
-    var offset = checked((int)(guestAddress - memoryBase));
-    if (offset < 0 || offset + bytes.Length > memory.Length)
-    {
-        throw new InvalidDataException($"Mod image '{path}' at 0x{guestAddress:X8} exceeds translator RAM image.");
-    }
-    bytes.CopyTo(memory.AsSpan(offset, bytes.Length));
-}
-
-IReadOnlySet<uint> FindNonReturningModuleCallTargets(
-    ContinuationPlan continuationPlan,
-    IReadOnlyList<ModFunctionStart> moduleFunctionStarts,
-    uint moduleStart,
-    uint moduleEnd)
-{
-    if (moduleFunctionStarts.Count == 0)
-    {
-        return new HashSet<uint>();
-    }
-
-    var sortedStarts = moduleFunctionStarts
-        .Where(start => start.Address >= moduleStart && start.Address < moduleEnd)
-        .GroupBy(start => start.Address)
-        .Select(group => group.First())
-        .OrderBy(start => start.Address)
-        .ToArray();
-    if (sortedStarts.Length == 0)
-    {
-        return new HashSet<uint>();
-    }
-
-    var result = new HashSet<uint>();
-    foreach (var continuation in continuationPlan.Entries)
-    {
-        if (continuation.SourceCommandId != KamekCommandId.Branch ||
-            continuation.SourceCommandAddress < moduleStart ||
-            continuation.SourceCommandAddress >= moduleEnd)
-        {
-            continue;
-        }
-
-        var sortedAddresses = sortedStarts.Select(start => start.Address).ToArray();
-        var index = Array.BinarySearch(sortedAddresses, continuation.SourceCommandAddress);
-        if (index < 0)
-        {
-            index = ~index - 1;
-        }
-
-        if (index >= 0)
-        {
-            result.Add(sortedStarts[index].Address);
-            for (var i = index - 1; i >= 0; --i)
-            {
-                var candidate = sortedStarts[i];
-                if (continuation.SourceCommandAddress - candidate.Address > 0x80u)
-                {
-                    break;
-                }
-                if (!candidate.Reason.Contains("scan", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.Add(candidate.Address);
-                    break;
-                }
-            }
-        }
-    }
-
-    return result;
-}
-
-IEnumerable<uint> DirectModuleTargets(FunctionTranslationResult result, uint moduleStart, uint moduleEnd)
-{
-    var localInstructions = result.Instructions
-        .Select(instruction => instruction.Address)
-        .ToHashSet();
-
-    foreach (var instruction in result.Instructions)
-    {
-        foreach (var target in instruction.BranchTargets)
-        {
-            if (target >= moduleStart &&
-                target < moduleEnd &&
-                (target & 0x3u) == 0 &&
-                !localInstructions.Contains(target))
-            {
-                yield return target;
-            }
-        }
-    }
-}
-
-int RunEmitBaseManifest()
-{
-    var loadedProject = RequireProject();
-    var outDir = optionValues.GetValueOrDefault("--out") ?? Path.GetDirectoryName(loadedProject.Output.BaseManifest)!;
-    var functionsDir = optionValues.GetValueOrDefault("--functions-dir") ?? loadedProject.Output.Functions;
-    var outputMetadataPath = optionValues.GetValueOrDefault("--translation-output-metadata");
-    var outputMetadata = outputMetadataPath is null
-        ? null
-        : BaseTranslationOutputMetadataFile.Read(outputMetadataPath);
-    outputMetadata?.RequireReleaseEligible(outputMetadataPath!);
-    var region = optionValues.GetValueOrDefault("--region") ?? loadedProject.Identity.Region ?? "unknown";
-
-    var rel = relFile.Value ?? throw new InvalidOperationException("Base mod manifest generation currently requires the project's single configured REL.");
-    var relImage = rel.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    var baseImage = new ProgramImageBuilder().Build(dolFile.Value, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
-    var result = BaseManifestBuilder.BuildAndWrite(
-        dolFile.Value,
-        rel,
-        relImage,
-        baseImage,
-        functionsDir,
-        outDir,
-        loadedProject.Identity.BaseManifestFormat,
-        loadedProject.Identity.GameId ?? loadedProject.Identity.Id,
-        region,
-        loadedProject.Identity.BaseManifestStem,
-        loadedProject.Memory.Base,
-        dolFile.Value.MemoryRange.Start,
-        Path.GetFileName(loadedProject.Inputs.Dol.Path),
-        Path.GetFileName(loadedProject.Inputs.Rel.Path),
-        outputMetadata);
-
-    Console.WriteLine($"[translator] Wrote base manifest: {result.ManifestPath}");
-    Console.WriteLine($"[translator] Wrote function ranges: {result.FunctionRangesPath}");
-    Console.WriteLine($"[translator] Sections: {result.Manifest.Sections.Count}");
-    Console.WriteLine($"[translator] Function ranges: {result.Manifest.Functions.Count}");
-    return 0;
-}
-
 int RunGenerateDataInit()
 {
     var loadedProject = RequireProject();
     var output = loadedProject.Output.DataInitializer;
     var runtimeConfigOutput = loadedProject.Output.RuntimeConfig;
     var dolPath = loadedProject.Inputs.Dol.Path;
-    string? relPath = loadedProject.Inputs.Rel?.Path;
 
     var dol = DolFile.Load(dolPath);
     
@@ -2687,27 +1409,13 @@ int RunGenerateDataInit()
     RuntimeConfigGenerator.GenerateConfigHeader(
         dataInitSda1Base, dataInitSda2Base, runtimeConfigOutput, loadedProject.Identity.DisplayName);
 
-    // Load the REL file for runtime embedding (apply relocations since runtime does not OSLink)
-    RelImage? relImage = null;
-    if (!string.IsNullOrWhiteSpace(relPath) && loadedProject.Inputs.Rel is { } configuredRel && File.Exists(relPath))
-    {
-        relImage = RelFile.Load(relPath).BuildImage(
-            configuredRel.LoadAddress,
-            applyRelocations: true);
-    }
-    
     // Generate the data section initializer
     var outputDir = Path.GetDirectoryName(output);
     if (!string.IsNullOrEmpty(outputDir))
     {
         Directory.CreateDirectory(outputDir);
     }
-    DataSectionGenerator.Generate(
-        dol,
-        relImage,
-        output,
-        loadedProject.Identity.DisplayName,
-        relPath is null ? "rel_module" : Path.GetFileNameWithoutExtension(relPath));
+    DataSectionGenerator.Generate(dol, output, loadedProject.Identity.DisplayName);
     
     // Emit the guest symbol table for crash-report symbolization. The function
     // map is already the project's authoritative name source; the runtime only
@@ -2715,16 +1423,11 @@ int RunGenerateDataInit()
     var guestSymbolOutput = Path.Combine(string.IsNullOrEmpty(outputDir) ? "." : outputDir, "guest_symbol_table.cpp");
     var guestSymbolCount = EmitGuestSymbolTable(functionMap, guestSymbolOutput);
 
-    // Calculate total size
     var dolDataSize = dol.Sections.Where(s => s.HasData).Sum(s => s.Size);
-    var relDataSize = relImage?.Data.Length ?? 0;
-    var totalSize = dolDataSize + relDataSize;
 
     Console.WriteLine($"[translator] Generated data section initializer: {output}");
     Console.WriteLine($"[translator] Guest symbol table: {guestSymbolCount:N0} named entries -> {guestSymbolOutput}");
-    Console.WriteLine($"[translator] DOL sections: {dolDataSize:N0} bytes");
-    Console.WriteLine($"[translator] REL data: {relDataSize:N0} bytes");
-    Console.WriteLine($"[translator] Total embedded: {totalSize:N0} bytes ({totalSize / 1024.0 / 1024.0:F2} MB)");
+    Console.WriteLine($"[translator] DOL sections: {dolDataSize:N0} bytes ({dolDataSize / 1024.0 / 1024.0:F2} MB)");
 
     return 0;
 }
@@ -2855,35 +1558,6 @@ static HashSet<uint> ComputeInteriorEntryPoints(IReadOnlyDictionary<uint, uint[]
     return interior;
 }
 
-/// <summary>
-/// Base functions where a Kamek-patched overlay could win direct-call dispatch at runtime, so
-/// callers can't narrow residency to the unpatched contract. Empty if no profile has a Code.pul.
-/// </summary>
-static IReadOnlySet<uint> BuildModOverridableCallTargets(
-    IReadOnlySet<uint> modPatchedAddresses,
-    IReadOnlyDictionary<uint, uint> translatedFunctionEnds)
-{
-    var overridable = new HashSet<uint>();
-    if (modPatchedAddresses.Count == 0)
-    {
-        return overridable;
-    }
-
-    var patched = modPatchedAddresses.ToArray();
-    Array.Sort(patched);
-
-    foreach (var (start, end) in translatedFunctionEnds)
-    {
-        // The recorded end is the last instruction's exclusive end, so a patch
-        // exactly at `end` belongs to the next function.
-        var index = Array.BinarySearch(patched, start);
-        if (index < 0) index = ~index;
-        if (index < patched.Length && patched[index] < end) overridable.Add(start);
-    }
-
-    return overridable;
-}
-
 int PruneStaleGeneratedFiles(
     string baseOutDir,
     HashSet<string> emittedPaths,
@@ -2895,11 +1569,6 @@ int PruneStaleGeneratedFiles(
         Console.Error.WriteLine($"[translator] Warning: {warning}");
     }
     return result.RemovedFiles;
-}
-
-IEnumerable<uint> DiscoverTranslationTargets(FunctionTranslationResult result)
-{
-    return DiscoverTranslationTargetsCore(result.Instructions, result.LinearIr);
 }
 
 IEnumerable<uint> DiscoverDiscoveryTranslationTargets(FunctionDiscoveryResult result)
@@ -2957,15 +1626,6 @@ IEnumerable<uint> DiscoverTranslationTargetsCore(
             yield return target;
         }
     }
-}
-
-// Discovers callback function pointers by checking all argument registers at every call site
-IEnumerable<uint> DiscoverCallbackTargets(
-    FunctionTranslationResult result,
-    string[] argRegs,
-    bool requireFunctionStart = true)
-{
-    return DiscoverCallbackTargetsCore(result.Instructions, argRegs, requireFunctionStart);
 }
 
 IEnumerable<uint> DiscoverCallbackTargetsCore(
@@ -3229,78 +1889,6 @@ IEnumerable<uint> DiscoverCallbackTargetsCore(
     string NormalizeReg(string reg) => reg.ToLowerInvariant();
 }
 
-/// <summary>
-/// Function entry points stored as a data-section word (vtables, dispatch tables, callbacks). Not a
-/// discovery seeder; answers which mod-build winners must stay reachable via dispatch table, not a static call.
-/// </summary>
-HashSet<uint> CollectDataSectionFunctionPointerTargets()
-{
-    var executableRanges = BuildExecutableRanges();
-    bool IsExecutable(uint addr) => executableRanges.Any(r => r.Contains(addr)) && (addr & 3) == 0;
-
-    var candidates = new HashSet<uint>();
-
-    // Scan DOL data sections for words that look like function pointers.
-    foreach (var section in dolFile.Value.Sections.Where(s => s.Kind == SectionKind.Data && s.HasData && s.Size >= 4))
-    {
-        var baseAddr = section.VirtualAddress;
-        var span = section.Data.Span;
-        for (var offset = 0; offset + 4 <= span.Length; offset += 4)
-        {
-            var value = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset, 4));
-            if (!IsExecutable(value))
-            {
-                continue;
-            }
-
-            if (!LooksLikeFunctionStart(value))
-            {
-                continue;
-            }
-
-            candidates.Add(value);
-        }
-    }
-
-    // Scan REL data sections (non-executable) using the relocated image bytes.
-    var rel = relFile.Value;
-    if (rel is null)
-    {
-        return candidates;
-    }
-    var relBase = image.Value.RelRange.Start;
-    var memory = image.Value.Memory;
-
-    foreach (var section in rel.Sections.Where(s => !s.Executable && s.FileOffset != 0 && s.Size >= 4))
-    {
-        var absStart = relBase + section.FileOffset;
-        if (!image.Value.Contains(absStart, checked((int)section.Size)))
-        {
-            continue;
-        }
-        var memOffset = image.Value.GetOffset(absStart, checked((int)section.Size));
-
-        var span = memory.AsSpan(memOffset, (int)section.Size);
-        for (var offset = 0; offset + 4 <= span.Length; offset += 4)
-        {
-            var value = BinaryPrimitives.ReadUInt32BigEndian(span.Slice(offset, 4));
-            if (!IsExecutable(value))
-            {
-                continue;
-            }
-
-            if (!LooksLikeFunctionStart(value))
-            {
-                continue;
-            }
-
-            candidates.Add(value);
-        }
-    }
-
-    return candidates;
-}
-
     bool LooksExecutable(uint address)
     {
         // Build into a local and publish the finished list under a gate. The
@@ -3322,18 +1910,6 @@ HashSet<uint> CollectDataSectionFunctionPointerTargets()
                             if (s.IsExecutable && s.Size > 0)
                             {
                                 ranges.Add(AddressRange.FromStartAndSize(s.VirtualAddress, s.Size));
-                            }
-                        }
-                    }
-
-                    if (relFile.IsValueCreated && relFile.Value is not null && image.IsValueCreated)
-                    {
-                        var relBase = image.Value.RelRange.Start;
-                        foreach (var s in relFile.Value.Sections)
-                        {
-                            if (s.Executable && s.Size > 0 && s.FileOffset != 0)
-                            {
-                                ranges.Add(AddressRange.FromStartAndSize(relBase + s.FileOffset, s.Size));
                             }
                         }
                     }
@@ -3372,24 +1948,8 @@ bool LooksLikeFunctionStart(uint address)
     return true;
 }
 
-List<AddressRange> BuildExecutableRanges()
-{
-    var ranges = new List<AddressRange>();
-    ranges.AddRange(dolFile.Value.Sections.Where(s => s.IsExecutable).Select(s => s.Range));
-
-    if (relFile.Value is { } rel)
-    {
-        var relBase = image.Value.RelRange.Start;
-        ranges.AddRange(rel.Sections
-            .Where(s => s.Executable && s.FileOffset != 0 && s.Size > 0)
-            .Select(s => AddressRange.FromStartAndSize(relBase + s.FileOffset, s.Size)));
-    }
-
-    return ranges;
-}
-
 TranslationProjectConfig RequireProject() => project ?? throw new InvalidOperationException(
-    "This command requires --project <path>. See projects/mkwii/recomp.yml for an example.");
+    "This command requires --project <path>. See projects/opuc1/recomp.yml for an example.");
 
 int ShowHelp(string invalidCommand)
 {
@@ -3417,7 +1977,7 @@ static void WriteUsage(TextWriter writer, IReadOnlyList<string> commands)
     {
         writer.WriteLine(CommandUsage(name));
     }
-    writer.WriteLine("Every command also accepts [--project path] [--profile name] [--help].");
+    writer.WriteLine("Every command also accepts [--project path] [--help].");
 }
 
 static string[] KnownCommands() => new[]
@@ -3425,11 +1985,8 @@ static string[] KnownCommands() => new[]
     "info",
     "generate-data-init",
     "translate-recursive",
-    "translate-mod",
-    "emit-base-manifest",
     "emit-build-shards",
-    "emit-native-index",
-    "check-base-mod-awareness"
+    "emit-native-index"
 };
 
 /// <summary>
@@ -3452,40 +2009,12 @@ static (string? Positional, CommandOption[] Options)? CommandSpec(string command
         new("--bounded-ir"),
         new("--prune-stale")
     }),
-    "translate-mod" => (null, new CommandOption[]
-    {
-        new("--code-pul", "path/to/Code.pul", Required: true),
-        new("--base-manifest", "path", Required: true),
-        new("--out", "path", Required: true),
-        new("--mod-root", "path"),
-        new("--mod-name", "name"),
-        new("--base-translation-output-metadata", "path"),
-        new("--region", "P"),
-        new("--module-guest-base", "0x81700000"),
-        new("--module-link-base", "0x803992E0"),
-        new("--threads", "N"),
-        new("--emit-cpp")
-    }),
-    "check-base-mod-awareness" => (null, new CommandOption[]
-    {
-        new("--translation-output-metadata", "path"),
-        new("--code-pul", "path")
-    }),
-    "emit-base-manifest" => (null, new CommandOption[]
-    {
-        new("--out", "path"),
-        new("--functions-dir", "generated/functions"),
-        new("--translation-output-metadata", "path"),
-        new("--region", "P")
-    }),
     "emit-build-shards" => (null, new CommandOption[]
     {
         new("--base-metadata", "path"),
         new("--base-functions-dir", "path"),
         new("--native-source-dir", "path"),
         new("--native-index", "path"),
-        new("--resolved-profile", "path"),
-        new("--retro-cpp-dir", "path"),
         new("--out", "generated/build_shards")
     }),
     "emit-native-index" => (null, new CommandOption[]
@@ -3520,7 +2049,7 @@ static (Dictionary<string, string> Values, HashSet<string> Flags, string? FirstC
     bool HelpRequested, string? UnrecognizedOption) ParseCommandLineOptions(string command, string[] args)
 {
     var spec = CommandSpec(command);
-    var valueNames = new HashSet<string>(StringComparer.Ordinal) { "--project", "--profile" };
+    var valueNames = new HashSet<string>(StringComparer.Ordinal) { "--project" };
     var flagNames = new HashSet<string>(StringComparer.Ordinal);
     foreach (var option in spec?.Options ?? Array.Empty<CommandOption>())
     {
@@ -3536,8 +2065,8 @@ static (Dictionary<string, string> Values, HashSet<string> Flags, string? FirstC
     for (var index = 1; index < args.Length; index++)
     {
         var token = args[index];
-        // The first --project and --profile pairs can precede the command's positional argument.
-        var firstGlobalValue = (token is "--project" or "--profile") && !values.ContainsKey(token);
+        // The first --project pair can precede the command's positional argument.
+        var firstGlobalValue = token is "--project" && !values.ContainsKey(token);
         if (!firstGlobalValue)
             firstCommandArgument ??= token;
 
@@ -3588,8 +2117,7 @@ ProgramImage LoadImage()
         $"[translator] SDA bases: r13 (_SDA_BASE_) 0x{sda1Base:X8}, r2 (_SDA2_BASE_) 0x{sda2Base:X8} " +
         $"(entry 0x{dol.EntryPoint:X8}).");
 
-    var relImage = relFile.Value?.BuildImage(loadedProject.Inputs.Rel!.LoadAddress);
-    return new ProgramImageBuilder().Build(dol, relImage, loadedProject.Memory.Base, loadedProject.Memory.Size);
+    return new ProgramImageBuilder().Build(dol, loadedProject.Memory.Base, loadedProject.Memory.Size);
 }
 
 DolFile LoadDol()
@@ -3597,15 +2125,9 @@ DolFile LoadDol()
     return DolFile.Load(RequireProject().Inputs.Dol.Path);
 }
 
-RelFile? LoadRel()
-{
-    return RequireProject().Inputs.Rel is { } rel ? RelFile.Load(rel.Path) : null;
-}
-
 static uint ParseAddress(string text) => GuestTargetParser.ParseHexAddress(text);
 
-// Small prewarm passes happen constantly (every discovered continuation wave);
-// only a whole-image-sized one is worth a line of output.
+// Only a whole-image-sized prewarm pass is worth a line of output.
 static void ReportAbiPrewarm(GuestAbiPrewarmReport report)
 {
     if (report.AddressCount <= 1024) return;
@@ -3682,114 +2204,30 @@ static int ParseInt(string text) =>
 
 /// <summary>
 /// Addresses a leaf splice must never cover: the decoded bytes aren't what the runtime
-/// executes there (native registration/fatal stub, exclusion, or a mod overlay rewrite).
+/// executes there (native registration/fatal stub or exclusion).
 /// </summary>
 static IReadOnlySet<uint> BuildLeafInliningBlockedTargets(
-    IReadOnlySet<uint> modPatchedAddresses,
     RuntimeNativeGuestEffectSet nativeGuestEffects,
     IReadOnlySet<uint> translationExclusions)
 {
     var blocked = new HashSet<uint>(nativeGuestEffects.Contracts.Keys);
     blocked.UnionWith(translationExclusions);
-    blocked.UnionWith(modPatchedAddresses);
     return blocked;
 }
 
-/// <summary>
-/// Every enabled project profile with a Code.pul on disk, ordered by name. Enumerating all
-/// of them (not just the selected one) keeps a profile-less base translation valid downstream.
-/// </summary>
-static IReadOnlyList<Translator.Cli.Configuration.ProjectProfile> CollectModPatchProfiles(
-    Translator.Cli.Configuration.TranslationProjectConfig? project,
-    Translator.Cli.Configuration.ProjectProfile? selectedProfile)
-{
-    var profiles = new Dictionary<string, Translator.Cli.Configuration.ProjectProfile>(StringComparer.OrdinalIgnoreCase);
-    if (project is not null)
-    {
-        foreach (var candidate in project.Profiles.Values)
-        {
-            if (candidate.Enabled &&
-                !string.IsNullOrWhiteSpace(candidate.CodePul) &&
-                File.Exists(candidate.CodePul))
-            {
-                profiles[candidate.Name] = candidate;
-            }
-        }
-    }
-    // An explicitly selected profile always participates, even if a future
-    // caller selects one that is marked disabled in the project file.
-    if (selectedProfile is not null &&
-        !string.IsNullOrWhiteSpace(selectedProfile.CodePul) &&
-        File.Exists(selectedProfile.CodePul))
-    {
-        profiles[selectedProfile.Name] = selectedProfile;
-    }
-
-    return profiles.Values.OrderBy(static p => p.Name, StringComparer.OrdinalIgnoreCase).ToArray();
-}
-
-/// <summary>
-/// The mod-patch awareness stamp recorded into the base translation output
-/// metadata: one entry per profile whose patch set shaped this translation.
-/// translate-mod refuses a base tree whose stamp does not cover its Code.pul.
-/// </summary>
-static IReadOnlyList<BaseTranslationModPatchAwareness> BuildModPatchAwareness(
-    IReadOnlyList<Translator.Cli.Configuration.ProjectProfile> patchProfiles) =>
-    patchProfiles
-        .Select(static patchProfile => new BaseTranslationModPatchAwareness(
-            patchProfile.Name,
-            ChecksumUtilities.Sha256HexOfFile(patchProfile.CodePul!)))
-        .ToArray();
-
-/// <summary>
-/// The same profiles, carrying the patch set itself rather than a digest of the file it came from.
-/// <see cref="BaseTranslationModAwareness"/> narrows that set down to the addresses this translation
-/// could actually see, which is what lets a later Code.pul reuse the completed base tree.
-/// </summary>
-static IReadOnlyList<(string Profile, string Region, string CodePulSha256, IReadOnlySet<uint> PatchedAddresses)>
-    BuildModPatchAwarenessDetail(IReadOnlyList<Translator.Cli.Configuration.ProjectProfile> patchProfiles) =>
-    patchProfiles
-        .Select(static patchProfile => (
-            Profile: patchProfile.Name,
-            Region: patchProfile.Region ?? string.Empty,
-            CodePulSha256: ChecksumUtilities.Sha256HexOfFile(patchProfile.CodePul!),
-            PatchedAddresses: BaseTranslationModAwareness.PatchedAddresses(
-                patchProfile.CodePul!, patchProfile.Region ?? string.Empty)))
-        .ToArray();
-
-/// <summary>
-/// Union of every absolute Kamek command address across the given profiles'
-/// Code.pul files: the addresses whose runtime winner can be a mod overlay.
-/// </summary>
-static IReadOnlySet<uint> BuildModPatchedAddresses(
-    IReadOnlyList<Translator.Cli.Configuration.ProjectProfile> patchProfiles)
-{
-    var patched = new HashSet<uint>();
-    foreach (var patchProfile in patchProfiles)
-    {
-        patched.UnionWith(BaseTranslationModAwareness.PatchedAddresses(
-            patchProfile.CodePul!, patchProfile.Region ?? string.Empty));
-    }
-
-    return patched;
-}
-
-// Every emitting translation path (base, mod overlay, continuation, module, payload) must run
-// its options through here so codegen policy can't diverge; mod paths once built TranslationOptions
-// independently and silently shipped pre-residency codegen. Leaf inlining stays out of here since it
-// rewrites IR before SSA and belongs to discovery (WithProjectFrontEndPolicy); mod, overlay and
-// payload builds use a different image and stay un-inlined.
+// Every emitting translation path (state-free refinement and the final emission wave) runs its
+// options through here so codegen policy can't diverge. Leaf inlining stays out of here since it
+// rewrites IR before SSA and belongs to discovery (WithProjectFrontEndPolicy).
 static TranslationOptions WithProjectCodegenPolicy(
     TranslationOptions options,
-    ProjectTranslation translation,
-    uint entryPoint) =>
+    ProjectTranslation translation) =>
     options with
     {
         AllowUnsupportedInstructions = translation.AllowUnsupportedInstructions,
         // Leaf ABI spill elision is structurally self-guarding: it requires a
         // matched save/restore pair inside the emitted body of a single-return
-        // leaf, so a partial mod chunk that only carries one half of an ABI
-        // prologue is rejected rather than mis-transformed.
+        // leaf, so a body that only carries one half of an ABI prologue is
+        // rejected rather than mis-transformed.
         EnableLeafAbiSpillElision = true,
     };
 
@@ -3799,28 +2237,3 @@ static TranslationOptions WithProjectCodegenPolicy(
 /// only controls whether usage brackets it.
 /// </summary>
 readonly record struct CommandOption(string Name, string? Value = null, bool Required = false);
-
-sealed record ResolvedDispatchEntry(
-    uint Address,
-    string Symbol,
-    string Name,
-    string Kind,
-    uint Priority,
-    bool DirectCallAvailable,
-    uint GprReadMask,
-    uint GprWriteMask,
-    uint GprClobberMask,
-    uint GprReturnMask,
-    uint FprReadMask,
-    uint FprWriteMask,
-    uint FprReturnMask,
-    byte CrReadMask,
-    byte CrWriteMask,
-    bool ReadsXer,
-    bool WritesXer,
-    bool IsFullSynchronizationFence,
-    bool PreservesNonvolatileFprs,
-    uint NonvolatileFprWriteMask,
-    bool MustRemainDynamicallyDispatchable,
-    string SourceFile);
-

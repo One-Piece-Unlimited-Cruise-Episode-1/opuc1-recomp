@@ -64,8 +64,8 @@ public sealed record LeafInlineCandidate(
 /// <param name="MaxCalleeGuestInstructions">Largest callee that may be spliced.</param>
 /// <param name="MaxCallerGrowthPercent">Growth budget as a percentage of the caller's own IR size.</param>
 /// <param name="MinCallerGrowthInstructions">Floor for the growth budget, so a small caller can still absorb one leaf.</param>
-/// <param name="BlockedTargets">Addresses whose translated body loses to a native override, base-translation
-/// exclusion, or mod patch; inlining one would bypass that replacement.</param>
+/// <param name="BlockedTargets">Addresses whose translated body loses to a native override or base-translation
+/// exclusion; inlining one would bypass that replacement.</param>
 public sealed record LeafInliningPolicy(
     int MaxCalleeGuestInstructions = 32,
     int MaxCallerGrowthPercent = 50,

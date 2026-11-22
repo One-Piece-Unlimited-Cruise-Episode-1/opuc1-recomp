@@ -115,7 +115,6 @@ public sealed class GenericProjectTests
                 """);
 
             var project = TranslationProjectConfig.Load(projectPath);
-            Assert.Null(project.Inputs.Rel);
             Assert.Equal(entry, Assert.Single(project.Translation.EntryPoints));
 
             var dol = DolFile.Load(project.Inputs.Dol.Path);

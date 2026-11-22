@@ -37,22 +37,6 @@ public static partial class GeneratedMarkers
         $"// RECOMP_REGISTRATION base 0x{entryPoint:X8} {symbol} " +
         $"preserves={Bool(preservesNonvolatileFprs)} fpr_mask=0x{nonvolatileFprWriteMask:X8}";
 
-    /// <summary>
-    /// The registration facts of a mod overlay function. <paramref name="prettyName"/>
-    /// is already escaped for a C++ string literal by the caller.
-    /// </summary>
-    public static string ModRegistration(
-        uint entryPoint,
-        string symbol,
-        string prettyName,
-        bool preservesNonvolatileFprs,
-        uint nonvolatileFprWriteMask,
-        uint priority,
-        ulong moduleId) =>
-        $"// RECOMP_REGISTRATION mod 0x{entryPoint:X8} {symbol} \"{prettyName}\" " +
-        $"preserves={Bool(preservesNonvolatileFprs)} fpr_mask=0x{nonvolatileFprWriteMask:X8} " +
-        $"priority={priority} module_id={moduleId}";
-
     private static string Bool(bool value) => value ? "true" : "false";
 
     [GeneratedRegex(@"RECOMP_GUEST_ABI gpr_read=0x(?<gr>[0-9A-Fa-f]{8}) gpr_write=0x(?<gw>[0-9A-Fa-f]{8}) gpr_return=0x(?<gret>[0-9A-Fa-f]{8}) fpr_read=0x(?<fr>[0-9A-Fa-f]{8}) fpr_write=0x(?<fw>[0-9A-Fa-f]{8}) fpr_return=0x(?<fret>[0-9A-Fa-f]{8}) cr_read=0x(?<crr>[0-9A-Fa-f]{2}) cr_write=0x(?<crw>[0-9A-Fa-f]{2}) xer_read=(?<xr>[01]) xer_write=(?<xw>[01]) fence=(?<fence>[01])", RegexOptions.CultureInvariant)]
@@ -60,14 +44,6 @@ public static partial class GeneratedMarkers
 
     [GeneratedRegex(@"// RECOMP_REGISTRATION base 0x(?<address>[0-9A-Fa-f]{8}) (?<symbol>[A-Za-z_][A-Za-z0-9_]*) preserves=(?<preserves>true|false) fpr_mask=0x(?<mask>[0-9A-Fa-f]+)", RegexOptions.CultureInvariant)]
     public static partial Regex BaseRegistrationPattern();
-
-    /// <summary>
-    /// Every group the emitter writes, module id included. A copy of this pattern
-    /// used to stop at the priority field, so the resolved dispatch profile and
-    /// the shard emitter disagreed about what a well-formed marker even was.
-    /// </summary>
-    [GeneratedRegex("""// RECOMP_REGISTRATION mod 0x(?<address>[0-9A-Fa-f]{8}) (?<symbol>[A-Za-z_][A-Za-z0-9_]*) "(?<name>[^"]*)" preserves=(?<preserves>true|false) fpr_mask=0x(?<mask>[0-9A-Fa-f]+) priority=(?<priority>[0-9]+) module_id=(?<moduleId>[0-9]+)""", RegexOptions.CultureInvariant)]
-    public static partial Regex ModRegistrationPattern();
 
     /// <summary>
     /// Matches a whole registration marker line. The marker is translator-internal
@@ -83,11 +59,10 @@ public static partial class GeneratedMarkers
 
     /// <summary>
     /// <c>REGISTER_NATIVE_FUNCTION(0x…, symbol)</c> and its <c>_AS</c> alias form;
-    /// the <c>as</c> group tells the two apart. <c>REGISTER_NATIVE_WRAPPER_AS</c> and
-    /// <c>REGISTER_NATIVE_REPLACEMENT_AS</c> are alias forms too, named by the
-    /// <c>modOverlay</c> group.
+    /// the <c>as</c> group tells the two apart. The runtime's <c>REGISTER_NATIVE_WRAPPER_AS</c>
+    /// and <c>REGISTER_NATIVE_REPLACEMENT_AS</c> spellings are the same alias form.
     /// </summary>
-    [GeneratedRegex(@"REGISTER_NATIVE_(?:FUNCTION(?<as>_AS)?|(?<modOverlay>WRAPPER|REPLACEMENT)_AS)\s*\(\s*0x(?<address>[0-9A-Fa-f]{8})\s*,\s*(?<symbol>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"REGISTER_NATIVE_(?:FUNCTION(?<as>_AS)?|(?:WRAPPER|REPLACEMENT)(?<as>_AS))\s*\(\s*0x(?<address>[0-9A-Fa-f]{8})\s*,\s*(?<symbol>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
     public static partial Regex NativeFunctionRegistrationPattern();
 
     [GeneratedRegex(@"REGISTER_TRANSLATED_FUNCTION\s*\(\s*0x(?<address>[0-9A-Fa-f]{8})\s*,\s*(?<symbol>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]

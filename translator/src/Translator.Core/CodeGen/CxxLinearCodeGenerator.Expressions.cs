@@ -324,34 +324,6 @@ public sealed partial class CxxLinearCodeGenerator
             : $"({baseExpr} + {addr.Offset})";
     }
 
-    private static string RemapAddress(
-        IrAddress addr,
-        RepresentationEnvironment types,
-        IReadOnlyDictionary<string, uint> localConstants,
-        LinkedAddressRemap? remap)
-    {
-        if (remap is not null &&
-            (localConstants.TryGetValue(addr.Base, out var baseValue) ||
-             localConstants.TryGetValue(GetRegisterBaseName(addr.Base), out baseValue)))
-        {
-            var effective = unchecked(baseValue + (uint)addr.Offset);
-            var linkEnd = checked(remap.LinkBase + remap.CodeSize);
-            if (effective >= remap.LinkBase && effective < linkEnd)
-            {
-                var relocated = checked(remap.GuestBase + (effective - remap.LinkBase));
-                if (!remap.GuardAgainstResume)
-                {
-                    return $"0x{relocated:X8}u";
-                }
-
-                var runtime = Address(addr, types);
-                return $"(static_cast<uint32_t>({runtime}) == 0x{effective:X8}u ? 0x{relocated:X8}u : static_cast<uint32_t>({runtime}))";
-            }
-        }
-
-        return Address(addr, types);
-    }
-
     private static string BaseRegister(string name)
     {
         var idx = name.IndexOf('_');

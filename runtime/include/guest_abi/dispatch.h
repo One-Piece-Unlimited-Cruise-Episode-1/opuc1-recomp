@@ -394,7 +394,7 @@ MKW_PPC_FORCE_INLINE bool TryDispatchResolvedCpuTarget(const TranslatedFunctionI
         return false;
     }
 
-    RecompMod::ScopedTranslatedExecutionAddress translatedExecution(info->address);
+    TranslatedExecution::Scope translatedExecution(info->address);
     PpcNonvolatileFprGuard fprGuard(cpu, NonvolatileFprGuardMaskFor(info));
     PpcNonvolatileGprGuard gprGuard(cpu, ShouldPreserveNonvolatileGprsForRawCpuCall(info));
     if (TryGetCpuContext() != cpu) {
@@ -410,7 +410,7 @@ inline bool TryDispatchRawCpuTarget(const RawDispatchRecord* record, CpuContext*
     if (!record || !record->entry) {
         return false;
     }
-    RecompMod::ScopedTranslatedExecutionAddress translatedExecution(record->address);
+    TranslatedExecution::Scope translatedExecution(record->address);
     PpcNonvolatileGprGuard gprGuard(cpu, record->preserveNonvolatileGprs);
     PpcNonvolatileFprGuard fprGuard(cpu, record->nonvolatileFprWriteMask);
     if (TryGetCpuContext() != cpu) {
@@ -444,7 +444,7 @@ inline void DispatchKnownTranslatedCpuTargetStatic(CpuContext* cpu) {
     }
 
     CpuContextScope contextScope(cpu);
-    RecompMod::ScopedTranslatedExecutionAddress translatedExecution(Target);
+    TranslatedExecution::Scope translatedExecution(Target);
     if constexpr (KnownTranslatedCpuCall<Target>::kNonvolatileFprWriteMask == 0) {
         invokeKnownTranslated();
         return;
@@ -572,7 +572,7 @@ MKW_PPC_FORCE_INLINE bool TryDispatchUnguardedRawCpuTarget(uint32_t target, CpuC
         record->nonvolatileFprWriteMask != 0 || TryGetCpuContext() != cpu) {
         return false;
     }
-    RecompMod::ScopedTranslatedExecutionAddress translatedExecution(record->address);
+    TranslatedExecution::Scope translatedExecution(record->address);
     record->entry(cpu);
     return true;
 }

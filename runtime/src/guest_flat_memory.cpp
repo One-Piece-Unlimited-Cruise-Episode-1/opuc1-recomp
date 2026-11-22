@@ -15,7 +15,7 @@
 
 #include "memory.h"
 #include "ppc_runtime.h"
-#include "recomp_mod_loader.h"
+#include "guest_abi/exec_guard.h"
 #include "runtime_log.h"
 #include "system_bridge.h"
 
@@ -145,17 +145,6 @@ struct GuardedRange {
     uint64_t end = 0;
 };
 
-std::vector<GuardedRange>& ExecutableRanges() {
-    static std::vector<GuardedRange> ranges;
-    return ranges;
-}
-
-// 4 KiB guest pages currently PAGE_READONLY for the executable-write guard.
-std::vector<uint8_t>& ExecutableProtectedPages() {
-    static std::vector<uint8_t> pages(1u << 20, 0);  // 2^32 / 4 KiB
-    return pages;
-}
-
 std::vector<GuardedRange>& DeferredRanges() {
     static std::vector<GuardedRange> ranges;
     return ranges;
@@ -175,7 +164,6 @@ std::vector<uint8_t>& UnmappedCommittedBlocks() {
 
 std::atomic<uint32_t> g_countMmio{0};
 std::atomic<uint32_t> g_countEfb{0};
-std::atomic<uint32_t> g_countXGuard{0};
 std::atomic<uint32_t> g_countUnmapped{0};
 std::atomic<uint32_t> g_countUnmappedRegions{0};
 
@@ -361,25 +349,6 @@ bool CommitPlaceholder(uint8_t* address, uint64_t size, ProtectionFlags protecti
 bool IsMmio(uint32_t address) { return MemoryInline::IsMmioAddress(address); }
 bool IsGpuFifo(uint32_t address) { return MemoryInline::IsGpuFifoAddress(address); }
 
-void ApplyExecutableProtectionLocked() {
-    if (g_base == nullptr || RequiresCheckedAccess()) return;
-    auto& protectedPages = ExecutableProtectedPages();
-    for (const auto& range : ExecutableRanges()) {
-        // Only pages fully inside the range are protected: edge pages often share a page with data
-        // (MKW's THP buffers do), so guarding them would fault legitimate stores; their writes still go through the checked path.
-        const uint64_t first = RoundUp(range.start, kHostPageSize);
-        const uint64_t last = static_cast<uint64_t>(range.end) & ~(kHostPageSize - 1u);
-        if (last <= first) continue;
-        for (uint64_t page = first; page < last; page += kHostPageSize) {
-            const uint32_t pageIndex = static_cast<uint32_t>(page >> 12);
-            if (protectedPages[pageIndex] != 0) continue;
-            if (ProtectRange(g_base + page, kHostPageSize, kProtRead)) {
-                protectedPages[pageIndex] = 1;
-            }
-        }
-    }
-}
-
 bool SameLayout(const std::vector<RegionRequest>& lhs, const std::vector<RegionRequest>& rhs) {
     if (lhs.size() != rhs.size()) return false;
     for (size_t index = 0; index < lhs.size(); ++index) {
@@ -454,7 +423,7 @@ void ReportFatalGuestFault(const char* category, uint32_t guestAddress, bool isW
     // path (runtime/src/memory.cpp) reports the exact length instead.
     std::cerr << "  access size:   unknown (not recoverable from the fault record)" << std::endl;
     std::cerr << "  active func:   0x" << std::hex << std::uppercase
-              << RecompMod::CurrentTranslatedExecutionAddress() << std::dec << std::nouppercase
+              << TranslatedExecution::CurrentAddress() << std::dec << std::nouppercase
               << std::endl;
     std::cerr << "  detail:        " << detail << std::endl;
     if (auto* cpu = TryGetCpuContext()) {
@@ -481,7 +450,7 @@ void ReportUnmappedCommit(uint32_t guestAddress, uint64_t blockBase, bool isWrit
               << std::setfill(' ') << " (" << (isWrite ? "write" : "read")
               << "); committed zero-filled block 0x" << blockBase << "-0x"
               << (blockBase + kAllocationGranularity) << " active=0x"
-              << RecompMod::CurrentTranslatedExecutionAddress();
+              << TranslatedExecution::CurrentAddress();
     if (auto* cpu = TryGetCpuContext()) {
         std::cerr << " pc=0x" << cpu->pc << " lr=0x" << cpu->lr << " r1=0x" << cpu->gpr[1];
     }
@@ -529,7 +498,6 @@ void Initialize(const std::vector<RegionRequest>& regions) {
         }
         DeferredRanges().clear();
         ZeroMappedStorage();
-        ApplyExecutableProtectionLocked();
         return;
     }
 
@@ -605,7 +573,6 @@ void Initialize(const std::vector<RegionRequest>& regions) {
         throw std::runtime_error(LastErrorText("committing the no-access MMIO window"));
     }
 
-    ApplyExecutableProtectionLocked();
 #if defined(_WIN32)
     InstallVectoredHandler();
 #endif
@@ -662,24 +629,10 @@ void UnprotectDeferredRange(uint32_t address, size_t length) {
     ProtectRange(g_base + first, last - first, kProtReadWrite);
 }
 
-void RegisterExecutableRange(uint32_t start, uint32_t end) {
-    if (RequiresCheckedAccess() || end <= start) return;
-    std::lock_guard<std::mutex> lock(StateMutex());
-    auto& ranges = ExecutableRanges();
-    if (std::any_of(ranges.begin(), ranges.end(), [&](const GuardedRange& range) {
-            return range.start == start && range.end == end;
-        })) {
-        return;
-    }
-    ranges.push_back(GuardedRange{start, end});
-    ApplyExecutableProtectionLocked();
-}
-
 FaultCounters Counters() {
     FaultCounters counters;
     counters.mmio = g_countMmio.load(std::memory_order_relaxed);
     counters.efb = g_countEfb.load(std::memory_order_relaxed);
-    counters.xguard = g_countXGuard.load(std::memory_order_relaxed);
     counters.unmapped = g_countUnmapped.load(std::memory_order_relaxed);
     counters.unmappedRegions = g_countUnmappedRegions.load(std::memory_order_relaxed);
     return counters;
@@ -691,7 +644,7 @@ void LogFaultSummary() noexcept {
     const FaultCounters counters = Counters();
     if (counters.unmapped == 0) {
         RT_LOG(RT_TAG_MEMORY) << "shutdown summary: no unmapped guest touches (efb="
-                  << counters.efb << " xguard=" << counters.xguard << " mmio=" << counters.mmio
+                  << counters.efb << " mmio=" << counters.mmio
                   << ")" << std::endl;
         std::cerr.flush();
         return;
@@ -703,7 +656,7 @@ void LogFaultSummary() noexcept {
                  "'[" RT_TAG_MEMORY "] WARNING unmapped guest touch' for the faulting addresses."
               << std::endl;
     RT_LOG(RT_TAG_MEMORY) << "shutdown summary: efb=" << counters.efb
-              << " xguard=" << counters.xguard << " mmio=" << counters.mmio << std::endl;
+              << " mmio=" << counters.mmio << std::endl;
     std::cerr.flush();
 }
 
@@ -756,35 +709,7 @@ bool HandleAccessViolation(void* faultAddress, bool isWrite) noexcept {
         }
     }
 
-    // 2) Executable-write guard. Only writes trap (the pages are PAGE_READONLY),
-    //    so a fault here is exactly the event the guard exists to report.
-    {
-        const uint32_t pageIndex = guestAddress >> 12;
-        bool guarded = false;
-        {
-            std::lock_guard<std::mutex> lock(StateMutex());
-            guarded = ExecutableProtectedPages()[pageIndex] != 0;
-        }
-        if (guarded) {
-            g_countXGuard.fetch_add(1, std::memory_order_relaxed);
-            // Aborts inside CheckExecutableWrite for an unsupported patch; the
-            // width and value are not recoverable from the fault record, so the
-            // report carries the exact address instead.
-            if (!RecompMod::HandleExecutableWrite(guestAddress, 1, 0)) {
-                // A permitted write (the REL loader relocating its own text).
-                // Those arrive in bulk, so the page is opened permanently
-                // rather than trapping every relocation.
-                std::lock_guard<std::mutex> lock(StateMutex());
-                if (ProtectRange(g_base + (static_cast<uint64_t>(pageIndex) << 12), kHostPageSize,
-                                 kProtReadWrite)) {
-                    ExecutableProtectedPages()[pageIndex] = 0;
-                }
-            }
-            return true;
-        }
-    }
-
-    // 3) MMIO. PAGE_NOACCESS makes both directions faults: a write has no backing device (including a GPU
+    // 2) MMIO. PAGE_NOACCESS makes both directions faults: a write has no backing device (including a GPU
     //    FIFO store the translator failed to lower), and a read would have to invent a register value;
     //    answering zero would turn a missing device into a silent hang, so both are reported instead.
     if (IsMmio(guestAddress)) {

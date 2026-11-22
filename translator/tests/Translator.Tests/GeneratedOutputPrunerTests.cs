@@ -1,5 +1,4 @@
 using Translator.Core.Build;
-using Translator.Core.Mods;
 
 namespace Translator.Tests;
 
@@ -84,5 +83,53 @@ public sealed class GeneratedOutputPrunerTests
             address,
             [],
             build);
+    }
+}
+
+public sealed class BaseTranslationOutputMetadataTests
+{
+    [Fact]
+    public void OutputMetadataWriteIsDeterministicAndChangeAware()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"translator-output-metadata-{Guid.NewGuid():N}");
+        var path = Path.Combine(directory, "base_output.json");
+        var metadata = BaseTranslationOutputMetadata.Create([
+            new BaseTranslationFunctionMetadata("b.cpp", 2, new string('b', 64), 2, []),
+            new BaseTranslationFunctionMetadata("a.cpp", 1, new string('a', 64), 1, [3])
+        ], TranslationQualityMetadata.Clean, "identity");
+        try
+        {
+            Assert.True(BaseTranslationOutputMetadataFile.WriteIfChangedAtomic(path, metadata));
+            var timestamp = File.GetLastWriteTimeUtc(path);
+            Assert.False(BaseTranslationOutputMetadataFile.WriteIfChangedAtomic(path, metadata));
+            Assert.Equal(timestamp, File.GetLastWriteTimeUtc(path));
+
+            var roundTrip = BaseTranslationOutputMetadataFile.Read(path);
+            Assert.Equal("a.cpp", roundTrip.Functions[0].RelativePath);
+            Assert.Equal("identity", roundTrip.TranslationIdentityHash);
+            Assert.Equal(TranslationQualityMetadata.Clean, roundTrip.Quality);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(0, 1)]
+    public void ReleaseEligibilityRejectsTranslationQualityFailures(
+        int unsupportedInstructionCount,
+        int invalidSsaFunctionCount)
+    {
+        var metadata = BaseTranslationOutputMetadata.Create([
+            new BaseTranslationFunctionMetadata(
+                "func_80001000.cpp", 1, new string('a', 64), 0x80001000u, [])
+        ], new TranslationQualityMetadata(unsupportedInstructionCount, invalidSsaFunctionCount));
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            metadata.RequireReleaseEligible("test metadata"));
+
+        Assert.Contains("Release translation quality failure", error.Message, StringComparison.Ordinal);
     }
 }

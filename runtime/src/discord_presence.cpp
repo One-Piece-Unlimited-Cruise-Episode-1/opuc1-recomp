@@ -150,7 +150,7 @@ public:
     void SetClient(const std::string& clientId) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!IsClientId(clientId)) {
-            RT_LOG(RT_TAG_RUNTIME) << "Ignoring invalid Discord client ID from /dev/dolphin" << std::endl;
+            RT_LOG(RT_TAG_RUNTIME) << "Ignoring invalid Discord client ID" << std::endl;
             return;
         }
         if (clientId_ == clientId && connected_) {

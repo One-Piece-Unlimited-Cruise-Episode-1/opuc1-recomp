@@ -32,13 +32,8 @@ jobs:
       - name: Build
         run: dotnet build translator/Translator.sln -c Release --no-restore
 
-      # The excluded tests read Mario Kart Wii project files (projects/mkwii*, region maps, Code.pul) that this
-      # repository does not carry.
       - name: Test
-        shell: pwsh
-        run: >-
-          dotnet test translator/Translator.sln -c Release --no-build --verbosity normal
-          --filter "FullyQualifiedName!~ProductionTranslationPolicyTests.ProductionProjectIsStrict&FullyQualifiedName!~RuntimeNativeIndexTests.RepositoryWrapperNativesCallThroughToTheNextTranslation&FullyQualifiedName!~RuntimeNativeIndexTests.SerializedRepositoryIndexRoundTripsExactly&FullyQualifiedName!~GuestAddressTableTests.RepositoryMap&FullyQualifiedName!~GuestAddressTableTests.RuntimeGuestCallsAreFunctionEntriesInEveryRegion&FullyQualifiedName!~KamekPulFileTests.ParsesBundledRetroRewindCodePulWhenPresent"
+        run: dotnet test translator/Translator.sln -c Release --no-build --verbosity normal
 
   tools:
     name: Tools (binding check)

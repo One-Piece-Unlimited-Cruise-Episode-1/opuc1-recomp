@@ -15,8 +15,7 @@ internal sealed class TranslationProjectConfig
         ProjectInputs inputs,
         ProjectTranslation translation,
         ProjectRuntime runtime,
-        ProjectOutput output,
-        IReadOnlyDictionary<string, ProjectProfile> profiles)
+        ProjectOutput output)
     {
         SourcePath = sourcePath;
         WorkspaceRoot = workspaceRoot;
@@ -26,7 +25,6 @@ internal sealed class TranslationProjectConfig
         Translation = translation;
         Runtime = runtime;
         Output = output;
-        Profiles = profiles;
     }
 
     public string SourcePath { get; }
@@ -37,7 +35,6 @@ internal sealed class TranslationProjectConfig
     public ProjectTranslation Translation { get; }
     public ProjectRuntime Runtime { get; }
     public ProjectOutput Output { get; }
-    public IReadOnlyDictionary<string, ProjectProfile> Profiles { get; }
 
     public static TranslationProjectConfig Load(string path)
     {
@@ -62,10 +59,7 @@ internal sealed class TranslationProjectConfig
         var identity = new ProjectIdentity(
             Require(dto.Project?.Id, "project.id"),
             dto.Project?.DisplayName ?? dto.Project?.Id!,
-            dto.Project?.GameId,
-            dto.Project?.Region,
-            dto.Project?.BaseManifestFormat ?? "recomp-base-manifest",
-            dto.Project?.BaseManifestStem ?? "base");
+            dto.Project?.GameId);
         var memory = new ProjectMemory(
             ParseUInt32(dto.Memory?.Base, MemoryLayout.RamBase, "memory.base"),
             ParseInt32(dto.Memory?.Size, MemoryLayout.RamSize, "memory.size"),
@@ -74,15 +68,6 @@ internal sealed class TranslationProjectConfig
 
         var dolDto = dto.Inputs?.Dol ?? throw new InvalidDataException("Translation project requires inputs.dol.");
         var dol = ResolveInput(workspaceRoot, dolDto, "inputs.dol");
-        ProjectRelInput? rel = null;
-        if (dto.Inputs?.Rel is { Path.Length: > 0 } relDto)
-        {
-            var relInput = ResolveInput(workspaceRoot, relDto, "inputs.rel");
-            rel = new ProjectRelInput(
-                relInput.Path,
-                relInput.Sha256,
-                ParseUInt32(relDto.LoadAddress, null, "inputs.rel.load_address"));
-        }
 
         var entryPoints = (dto.Translation?.EntryPoints ?? [])
             .Select((value, index) => ParseUInt32(value, null, $"translation.entry_points[{index}]"))
@@ -111,69 +96,19 @@ internal sealed class TranslationProjectConfig
             outputRoot,
             ResolveOutput(outputRoot, dto.Output?.Functions, "functions"),
             ResolveOutput(outputRoot, dto.Output?.RuntimeConfig, "RuntimeConfig.h"),
-            ResolveOutput(outputRoot, dto.Output?.DataInitializer, "data_sections_init.cpp"),
-            ResolveOutput(outputRoot, dto.Output?.BaseManifest, Path.Combine("base", "base_manifest.json")));
-
-        var profiles = new Dictionary<string, ProjectProfile>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (name, profileDto) in dto.Profiles ?? new Dictionary<string, ProfileDto>())
-        {
-            profiles[name] = new ProjectProfile(
-                name,
-                profileDto.Enabled ?? true,
-                ResolveOptionalPath(workspaceRoot, profileDto.CodePul),
-                ResolveOptionalPath(workspaceRoot, profileDto.ModRoot),
-                profileDto.Region,
-                ParseOptionalUInt32(profileDto.ModuleGuestBase, $"profiles.{name}.module_guest_base"),
-                ParseOptionalUInt32(profileDto.ModuleLinkBase, $"profiles.{name}.module_link_base"),
-                ResolveOptionalPath(workspaceRoot, profileDto.Output),
-                profileDto.RequiresGameId,
-                NormalizeHash(profileDto.RequiresDolSha256),
-                ResolveRiivolution(profileDto.Riivolution, name));
-        }
+            ResolveOutput(outputRoot, dto.Output?.DataInitializer, "data_sections_init.cpp"));
 
         var config = new TranslationProjectConfig(
             sourcePath,
             workspaceRoot,
             identity,
             memory,
-            new ProjectInputs(dol, rel),
+            new ProjectInputs(dol),
             translation,
             runtime,
-            output,
-            profiles);
+            output);
         config.ValidateInputs();
         return config;
-    }
-
-    public ProjectProfile? GetProfile(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name) || string.Equals(name, "base", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        return Profiles.TryGetValue(name, out var profile)
-            ? profile
-            : throw new InvalidDataException($"Project '{Identity.Id}' has no profile named '{name}'.");
-    }
-
-    public void ValidateProfile(ProjectProfile profile)
-    {
-        if (!profile.Enabled)
-        {
-            throw new InvalidDataException($"Profile '{profile.Name}' is disabled.");
-        }
-        if (!string.IsNullOrWhiteSpace(profile.RequiresGameId) &&
-            !string.Equals(profile.RequiresGameId, Identity.GameId, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException(
-                $"Profile '{profile.Name}' requires game ID {profile.RequiresGameId}, but project is {Identity.GameId ?? "unspecified"}.");
-        }
-        if (!string.IsNullOrWhiteSpace(profile.RequiresDolSha256) &&
-            !string.Equals(profile.RequiresDolSha256, FileSha256(Inputs.Dol.Path), StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException($"Profile '{profile.Name}' is not compatible with this DOL hash.");
-        }
     }
 
     /// <summary>The pinned Small Data Area bases (r13/r2), or a diagnostic naming which manifest keys are missing.</summary>
@@ -197,10 +132,6 @@ internal sealed class TranslationProjectConfig
     private void ValidateInputs()
     {
         ValidateInput(Inputs.Dol, "DOL");
-        if (Inputs.Rel is not null)
-        {
-            ValidateInput(Inputs.Rel, "REL");
-        }
         if (Translation.FunctionMapPath is { } functionMapPath && !File.Exists(functionMapPath))
         {
             throw new FileNotFoundException("Configured function map was not found.", functionMapPath);
@@ -242,9 +173,6 @@ internal sealed class TranslationProjectConfig
     private static string ResolveOutput(string outputRoot, string? value, string fallback) =>
         ResolvePath(outputRoot, string.IsNullOrWhiteSpace(value) ? fallback : value);
 
-    private static string? ResolveOptionalPath(string root, string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : ResolvePath(root, value);
-
     private static string ResolvePath(string root, string value)
     {
         var expanded = Environment.ExpandEnvironmentVariables(value);
@@ -253,60 +181,6 @@ internal sealed class TranslationProjectConfig
 
     private static string Require(string? value, string field) =>
         !string.IsNullOrWhiteSpace(value) ? value : throw new InvalidDataException($"Translation project requires {field}.");
-
-    // Riivolution declarations are verbatim distribution metadata, not paths on this machine:
-    // the XML lives inside the pack the runtime mounts, so it stays a forward-slashed
-    // pack-relative string and is never resolved against the workspace root.
-    private static ProjectRiivolution? ResolveRiivolution(RiivolutionDto? dto, string profileName)
-    {
-        if (dto is null)
-        {
-            return null;
-        }
-
-        var xml = NormalizePackRelativePath(dto.Xml);
-        if (xml.Length == 0)
-        {
-            throw new InvalidDataException($"Translation project requires profiles.{profileName}.riivolution.xml.");
-        }
-
-        var entries = dto.Options ?? [];
-        var options = new List<ProjectRiivolutionOption>(entries.Count);
-        for (var index = 0; index < entries.Count; index++)
-        {
-            var field = $"profiles.{profileName}.riivolution.options[{index}]";
-            var option = entries[index].Option?.Trim() ?? string.Empty;
-            if (option.Length == 0)
-            {
-                throw new InvalidDataException($"Translation project requires {field}.option.");
-            }
-            options.Add(new ProjectRiivolutionOption(
-                entries[index].Section?.Trim() ?? string.Empty,
-                option,
-                ParseUInt32(entries[index].Choice, 0u, $"{field}.choice")));
-        }
-
-        return new ProjectRiivolution(xml, options);
-    }
-
-    private static string NormalizePackRelativePath(string? value)
-    {
-        var text = (value ?? string.Empty).Trim().Replace('\\', '/');
-        while (true)
-        {
-            if (text.StartsWith("./", StringComparison.Ordinal))
-            {
-                text = text[2..];
-                continue;
-            }
-            if (text.StartsWith("/", StringComparison.Ordinal))
-            {
-                text = text[1..];
-                continue;
-            }
-            return text;
-        }
-    }
 
     private static uint ParseUInt32(string? value, uint? fallback, string field)
     {
@@ -351,7 +225,6 @@ internal sealed class TranslationProjectConfig
         public TranslationDto? Translation { get; init; }
         public RuntimeDto? Runtime { get; init; }
         public OutputDto? Output { get; init; }
-        public Dictionary<string, ProfileDto>? Profiles { get; init; }
     }
 
     private sealed class IdentityDto
@@ -359,9 +232,6 @@ internal sealed class TranslationProjectConfig
         public string? Id { get; init; }
         public string? DisplayName { get; init; }
         public string? GameId { get; init; }
-        public string? Region { get; init; }
-        public string? BaseManifestFormat { get; init; }
-        public string? BaseManifestStem { get; init; }
     }
 
     private sealed class MemoryDto
@@ -375,18 +245,12 @@ internal sealed class TranslationProjectConfig
     private sealed class InputsDto
     {
         public BinaryInputDto? Dol { get; init; }
-        public RelInputDto? Rel { get; init; }
     }
 
-    private class BinaryInputDto
+    private sealed class BinaryInputDto
     {
         public string Path { get; init; } = string.Empty;
         public string? Sha256 { get; init; }
-    }
-
-    private sealed class RelInputDto : BinaryInputDto
-    {
-        public string? LoadAddress { get; init; }
     }
 
     // Translation behaviour (state-free ABI, register residency, leaf inlining, flat guest memory) is
@@ -417,48 +281,16 @@ internal sealed class TranslationProjectConfig
         public string? Functions { get; init; }
         public string? RuntimeConfig { get; init; }
         public string? DataInitializer { get; init; }
-        public string? BaseManifest { get; init; }
-    }
-
-    private sealed class ProfileDto
-    {
-        public bool? Enabled { get; init; }
-        public string? CodePul { get; init; }
-        public string? ModRoot { get; init; }
-        public string? Region { get; init; }
-        public string? ModuleGuestBase { get; init; }
-        public string? ModuleLinkBase { get; init; }
-        public string? Output { get; init; }
-        public string? RequiresGameId { get; init; }
-        public string? RequiresDolSha256 { get; init; }
-        public RiivolutionDto? Riivolution { get; init; }
-    }
-
-    private sealed class RiivolutionDto
-    {
-        public string? Xml { get; init; }
-        public List<RiivolutionOptionDto>? Options { get; init; }
-    }
-
-    private sealed class RiivolutionOptionDto
-    {
-        public string? Section { get; init; }
-        public string? Option { get; init; }
-        public string? Choice { get; init; }
     }
 }
 
 internal sealed record ProjectIdentity(
     string Id,
     string DisplayName,
-    string? GameId,
-    string? Region,
-    string BaseManifestFormat,
-    string BaseManifestStem);
+    string? GameId);
 internal sealed record ProjectMemory(uint Base, int Size, uint? SdaBase = null, uint? Sda2Base = null);
-internal record ProjectBinaryInput(string Path, string? Sha256);
-internal sealed record ProjectRelInput(string Path, string? Sha256, uint LoadAddress) : ProjectBinaryInput(Path, Sha256);
-internal sealed record ProjectInputs(ProjectBinaryInput Dol, ProjectRelInput? Rel);
+internal sealed record ProjectBinaryInput(string Path, string? Sha256);
+internal sealed record ProjectInputs(ProjectBinaryInput Dol);
 internal sealed record ProjectTranslation(
     IReadOnlyList<uint> EntryPoints,
     string? FunctionMapPath,
@@ -471,24 +303,4 @@ internal sealed record ProjectOutput(
     string Root,
     string Functions,
     string RuntimeConfig,
-    string DataInitializer,
-    string BaseManifest);
-internal sealed record ProjectProfile(
-    string Name,
-    bool Enabled,
-    string? CodePul,
-    string? ModRoot,
-    string? Region,
-    uint? ModuleGuestBase,
-    uint? ModuleLinkBase,
-    string? Output,
-    string? RequiresGameId,
-    string? RequiresDolSha256,
-    ProjectRiivolution? Riivolution);
-internal sealed record ProjectRiivolution(
-    string Xml,
-    IReadOnlyList<ProjectRiivolutionOption> Options);
-internal sealed record ProjectRiivolutionOption(
-    string Section,
-    string Option,
-    uint Choice);
+    string DataInitializer);

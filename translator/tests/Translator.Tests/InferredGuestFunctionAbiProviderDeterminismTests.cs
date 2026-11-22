@@ -66,7 +66,7 @@ public sealed class InferredGuestFunctionAbiProviderDeterminismTests
         WriteWord(memory, 0x10, LinkBranch(FunctionB, FunctionA));
         WriteWord(memory, 0x14, 0x4E800020); // blr
         var range = AddressRange.FromStartAndSize(MemoryLayout.RamBase, (uint)memory.Length);
-        var image = new ProgramImage(memory, range, range, default, "abi-cycle-determinism");
+        var image = new ProgramImage(memory, range, range, "abi-cycle-determinism");
         return new InferredGuestFunctionAbiProvider(image);
     }
 

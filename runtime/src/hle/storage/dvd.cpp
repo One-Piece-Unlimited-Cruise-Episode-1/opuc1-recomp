@@ -11,10 +11,8 @@
 extern "C" void GxNotifyGuestRamDmaWrite(uint32_t addr, uint32_t size);
 #include "hle/storage/riivolution.h"
 #include "ppc_runtime.h"
-#include "recomp_mod_loader.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
-#include "runtime_product.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -845,17 +843,8 @@ extern "C" void DVDInit_8015EA1C()
     ScanDirectory(rootPath / "sys", "/sys/");
 
     const auto& overlays = RuntimeRiivolution::Overlays();
-    if (overlays.empty() && RuntimeProduct::IsRetroRewind()) {
-        RT_LOG(RT_TAG_DVD) << "WARNING: no Retro Rewind overlay root was found. "
-                     "File replacements (menu archives, karts, drivers, courses) will not apply "
-                     "and the game will look and play like the unmodded disc. Set "
-                     "[paths] retro_rewind_root in Config.toml "
-                     "with the RetroRewind6 folder."
-                  << std::endl;
-    }
     // RegisterFileEntry lets the last registration win, so apply the roots in
-    // reverse discovery order: the explicitly configured root outranks the mod
-    // manifest.
+    // reverse discovery order, so the first configured root wins.
     const size_t vanillaEntryCount = g_fileEntries.size();
     for (auto overlay = overlays.rbegin(); overlay != overlays.rend(); ++overlay) {
         ScanOverlayRoot(*overlay);

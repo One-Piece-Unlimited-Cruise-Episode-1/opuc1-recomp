@@ -33,8 +33,6 @@ MemoryInline::PageEntry MemoryInline::g_pageTable[MemoryInline::kPageCount]{};
 uintptr_t MemoryInline::g_fullPageBias[MemoryInline::kPageCount]{};
 uintptr_t MemoryInline::g_fullReadablePageBias[MemoryInline::kPageCount]{};
 uintptr_t MemoryInline::g_fullWritablePageBias[MemoryInline::kPageCount]{};
-const MemoryInline::SparseWritablePageTable*
-    MemoryInline::g_sparseWritablePageTables[MemoryInline::kPageCount]{};
 uint8_t MemoryInline::g_deferredReadCoveredPages[MemoryInline::kPageCount]{};
 template <typename T>
 T MemoryInline::ReadResolvedFallback(uint32_t addr) {
@@ -124,13 +122,6 @@ std::mutex& RegionMutex() {
     return mutex;
 }
 
-std::array<std::unique_ptr<MemoryInline::SparseWritablePageTable>,
-           MemoryInline::kPageCount>& SparseWritablePageTableStorage() {
-    static std::array<std::unique_ptr<MemoryInline::SparseWritablePageTable>,
-                      MemoryInline::kPageCount> storage;
-    return storage;
-}
-
 void ClearPageTable() {
     auto* table = MemoryInline::g_pageTable;
     for (uint32_t i = 0; i < MemoryInline::kPageCount; ++i) {
@@ -141,8 +132,6 @@ void ClearPageTable() {
         MemoryInline::g_fullReadablePageBias[i] = 0;
         MemoryInline::g_fullWritablePageBias[i] = 0;
         MemoryInline::g_deferredReadCoveredPages[i] = 0;
-        MemoryInline::g_sparseWritablePageTables[i] = nullptr;
-        SparseWritablePageTableStorage()[i].reset();
     }
 }
 
@@ -273,43 +262,11 @@ void BuildPageTable() {
 }
 
 void RefreshFastPathTables() {
-    auto& sparseStorage = SparseWritablePageTableStorage();
     for (uint32_t page = 0; page < MemoryInline::kPageCount; ++page) {
         const uintptr_t bias = MemoryInline::g_fullPageBias[page];
         MemoryInline::g_fullReadablePageBias[page] = bias;
         MemoryInline::g_deferredReadCoveredPages[page] = 0;
-        MemoryInline::g_sparseWritablePageTables[page] = nullptr;
-        sparseStorage[page].reset();
-
-        const bool coarseExecutable =
-            RecompMod::g_executableWriteGuardCoarsePages[page].load(
-                std::memory_order_relaxed) != 0;
-        MemoryInline::g_fullWritablePageBias[page] = coarseExecutable ? 0 : bias;
-        if (!coarseExecutable || bias == 0)
-            continue;
-
-        auto sparse = std::make_unique<MemoryInline::SparseWritablePageTable>();
-        bool hasExecutableSubPage = false;
-        bool hasWritableSubPage = false;
-        const uint32_t firstExactPage =
-            page * MemoryInline::kWritableSubPagesPerPage;
-        for (uint32_t subPage = 0;
-             subPage < MemoryInline::kWritableSubPagesPerPage; ++subPage) {
-            const bool executable =
-                RecompMod::g_executableWriteGuardPages[firstExactPage + subPage].load(
-                    std::memory_order_relaxed) != 0;
-            hasExecutableSubPage |= executable;
-            hasWritableSubPage |= !executable;
-            sparse->encodedBias[subPage] = executable ? 0 : bias;
-        }
-
-        // A homogeneous executable page has no writable fast path; a
-        // homogeneous data page already uses g_fullWritablePageBias. Retain an
-        // allocation only for the intended mixed case.
-        if (hasExecutableSubPage && hasWritableSubPage) {
-            MemoryInline::g_sparseWritablePageTables[page] = sparse.get();
-            sparseStorage[page] = std::move(sparse);
-        }
+        MemoryInline::g_fullWritablePageBias[page] = bias;
     }
     std::lock_guard lock{DeferredReadMutex()};
     for (const auto& read : DeferredReads()) {
@@ -342,7 +299,7 @@ Region& ResolveRegion(uint32_t address, size_t length) {
     }
     // Emit extra context to help diagnose early-boot accesses that miss the map.
     if (auto* cpu = TryGetCpuContext()) {
-        const uint32_t active = RecompMod::CurrentTranslatedExecutionAddress();
+        const uint32_t active = TranslatedExecution::CurrentAddress();
         RT_LOG(RT_TAG_MEMORY) << "AccessViolation ctx=" << cpu
                   << " pc=0x" << std::hex << cpu->pc
                   << " active=0x" << active
@@ -468,10 +425,6 @@ T ReadScalar(uint32_t address) {
 
 template <typename T>
 void WriteScalar(uint32_t address, T value) {
-    if (RecompMod::HandleExecutableWrite(address, sizeof(T), static_cast<uint64_t>(value))) {
-        return;
-    }
-
     auto* ptr = Memory::GetPointer(address, sizeof(T));
     if constexpr (sizeof(T) == 1) {
         *ptr = static_cast<uint8_t>(value);
@@ -499,11 +452,6 @@ Memory::AccessViolation::AccessViolation(uint32_t address, size_t length, std::s
       address_(address),
       length_(length),
       reason_(reason) {}
-
-void Memory::RefreshWritableFastPathsForExecutableRanges() {
-    std::lock_guard<std::mutex> lock(RegionMutex());
-    RefreshFastPathTables();
-}
 
 Memory::Config Memory::Config::WiiDefaults() {
     // Physical / cached / uncached views of MEM1 and MEM2, then the locked cache.
@@ -543,15 +491,6 @@ Memory::Config Memory::Config::WiiDefaults() {
         .name = "MEM2_UNCACHED",
         .baseAddress = Memory::kMem2UncachedBase,
         .sizeBytes = Memory::kMem2Size,
-    });
-
-    // Kamek module overlay: 2 MiB above MEM1, which the game believes ends at 0x81800000, so this
-    // costs no arena space (unlike the old in-arena reservation that shrank the race scene heaps).
-    // Base must stay within +/-32 MiB of every DOL/StaticR hook site for Kamek Rel24 branches to encode.
-    config.regions.push_back(RegionConfig{
-        .name = "MEM1_KAMEK_OVERLAY",
-        .baseAddress = 0x81800000,
-        .sizeBytes = 0x200000,
     });
 
     // Locked cache (THP decoder fast RAM) is really 16KB at 0xE0000000, but a sub-page mapping can
@@ -636,7 +575,7 @@ namespace {
                    : "MMIO read blocked (non-GPU)")
            << "; add HLE for this device instead of answering zero"
            << " (active=0x" << std::hex << std::uppercase
-           << RecompMod::CurrentTranslatedExecutionAddress() << std::dec << std::nouppercase << ")";
+           << TranslatedExecution::CurrentAddress() << std::dec << std::nouppercase << ")";
     throw Memory::AccessViolation(addr, length, reason.str());
 }
 } // namespace

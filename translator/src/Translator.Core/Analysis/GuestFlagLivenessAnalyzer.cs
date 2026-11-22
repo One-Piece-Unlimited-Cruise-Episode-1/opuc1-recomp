@@ -36,15 +36,13 @@ public readonly record struct GuestFlagState(byte CrFields, bool Carry)
 
 /// <summary>
 /// What the flag liveness transfer needs at a call site. A target missing from
-/// <see cref="CalleeContracts"/>, or listed in <see cref="OpaqueCallTargets"/> (a mod may replace
-/// it, so the published contract may not match what actually runs), is a complete flag boundary.
+/// <see cref="CalleeContracts"/> is a complete flag boundary.
 /// </summary>
 public sealed record GuestFlagLivenessContext(
-    IReadOnlyDictionary<uint, GuestAbiContract> CalleeContracts,
-    IReadOnlySet<uint> OpaqueCallTargets)
+    IReadOnlyDictionary<uint, GuestAbiContract> CalleeContracts)
 {
     public static GuestFlagLivenessContext Empty { get; } = new(
-        new Dictionary<uint, GuestAbiContract>(), new HashSet<uint>());
+        new Dictionary<uint, GuestAbiContract>());
 }
 
 public sealed record GuestFlagLivenessResult(
@@ -189,8 +187,7 @@ public static class GuestFlagLivenessAnalyzer
     {
         if (GuestTargetParser.TryParseAddress(call.Target, out var target))
         {
-            if (context.OpaqueCallTargets.Contains(target) ||
-                !context.CalleeContracts.TryGetValue(target, out var contract))
+            if (!context.CalleeContracts.TryGetValue(target, out var contract))
             {
                 return GuestFlagState.All;
             }

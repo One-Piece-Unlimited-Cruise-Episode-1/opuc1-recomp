@@ -336,46 +336,6 @@ public sealed class DirtyRegisterWritebackCodeGenTests
         Assert.Equal(1, Count(code, "ctx->gpr[4] = r4;"));
     }
 
-    [Fact]
-    public void FunctionWithLrContinuationLabelsKeepsPublishingEveryWrittenRegister()
-    {
-        // The callee may resume this body at the continuation label with state the dataflow does not model, so a
-        // function that has one stays on the old write-back-everything-written behaviour.
-        var function = new IrFunction("dirty_lr_continuation", "0x800E591C", new[]
-        {
-            new IrBasicBlock("0x800E591C", new IrInstruction[]
-            {
-                new IrAssign("r4", IrValue.Imm(5)),
-                new IrAssign("lr", IrValue.Imm(unchecked((int)0x800E5920u))),
-                new IrCall(string.Empty, "0x8179AC3C", Array.Empty<IrValue>()),
-                new IrAssign("r3", IrValue.Imm(8)),
-                new IrReturn(null)
-            }),
-            new IrBasicBlock("0x800E5934", new IrInstruction[]
-            {
-                new IrAssign("r3", IrValue.Imm(1)),
-                new IrReturn(null)
-            })
-        });
-        var types = new RepresentationEnvironment(new Dictionary<string, ValueRepresentation>
-        {
-            ["lr"] = ValueRepresentation.UInt32,
-            ["r3"] = ValueRepresentation.UInt32,
-            ["r4"] = ValueRepresentation.UInt32
-        });
-
-        var code = new CxxLinearCodeGenerator().Emit(
-            0x800E591C,
-            new SsaTransformer().Convert(function),
-            new FunctionAbiClassification(function.Name, ValueRepresentation.Void),
-            types,
-            lrContinuationCallTargets: new HashSet<uint> { 0x8179AC3Cu }).ReplaceLineEndings(Lf);
-
-        var continuation = BlockText(code, "loc_800E5934");
-        Assert.Contains("ctx->gpr[3] = r3;", continuation, StringComparison.Ordinal);
-        Assert.Contains("ctx->gpr[4] = r4;", continuation, StringComparison.Ordinal);
-    }
-
     private static GuestAbiContract Contract(uint gprRead = 0, uint gprWrite = 0) =>
         new(
             GprReadBeforeWriteMask: gprRead,

@@ -12,7 +12,7 @@ namespace Translator.Tests;
 
 /// <summary>
 /// Pins that a resident call's fast arm carries no CpuContext traffic, while the
-/// <c>InvokeDirectCpu</c> arm (used when a mod overlay replaces the callee) keeps
+/// <c>InvokeDirectCpu</c> arm (used when the callee is not available state-free) keeps
 /// its own flush/reload pair.
 /// </summary>
 public class StateFreeResidentMarshallingTests

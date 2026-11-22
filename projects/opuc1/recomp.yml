@@ -5,9 +5,6 @@ project:
   id: opuc1-roupaf
   display_name: One Piece Unlimited Cruise 1 PAL
   game_id: ROUPAF
-  region: P
-  base_manifest_format: opuc1-recomp-base-manifest
-  base_manifest_stem: opuc1_base
 
 memory:
   base: 0x80000000
@@ -37,4 +34,3 @@ output:
   functions: functions
   runtime_config: RuntimeConfig.h
   data_initializer: data_sections_init.cpp
-  base_manifest: ../build/base/opuc1_base_manifest.json

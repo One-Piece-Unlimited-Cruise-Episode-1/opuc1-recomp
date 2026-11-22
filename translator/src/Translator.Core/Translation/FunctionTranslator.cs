@@ -28,12 +28,6 @@ public sealed record TranslationOptions(
     int MaxInstructions = 8192,
     int MaxBytes = 0x10000,
     bool AllowUnsupportedInstructions = false,
-    bool EmitModRegistration = false,
-    uint ModRegistrationPriority = 100,
-    ulong ModRegistrationModuleId = 1,
-    IReadOnlySet<uint>? NonReturningCallTargets = null,
-    IReadOnlySet<uint>? LrContinuationCallTargets = null,
-    IReadOnlyDictionary<uint, uint>? LinkedCallFallthroughLrOverrides = null,
     IReadOnlySet<uint>? KnownFunctionEntryPoints = null,
     IReadOnlyDictionary<uint, GuestAbiContract>? GuestAbiContracts = null,
     bool EmitStateFreeLeafVariant = false,
@@ -41,14 +35,10 @@ public sealed record TranslationOptions(
     IReadOnlyDictionary<uint, string>? StateFreeCallSymbols = null,
     IReadOnlyDictionary<GuestStateFreeCallSiteKey, GuestStateFreeCallVariant>? StateFreeCallSiteVariants = null,
     IReadOnlyList<GuestStateFreeCallVariant>? StateFreeEntryVariants = null,
-    uint? ModuleLinkBase = null,
-    uint? ModuleGuestBase = null,
-    uint ModuleLinkedCodeSize = 0,
     IReadOnlyDictionary<string, uint>? GqrEntryConstants = null,
     IReadOnlyDictionary<uint, byte>? GqrCalleeWriteMasks = null,
     bool GqrConstantsRequireRuntimeGuard = false,
     bool EnableLeafAbiSpillElision = false,
-    IReadOnlySet<uint>? ModOverridableCallTargets = null,
     bool GenerateCxx = true,
     bool DiscoveryOnly = false,
     /// <summary>
@@ -59,8 +49,8 @@ public sealed record TranslationOptions(
     bool EnableLeafInlining = true,
     /// <summary>
     /// Addresses whose translated body is not the runtime winner - native
-    /// registrations, base-translation exclusions and mod patch sites. These are
-    /// never inlined, because the splice would bypass the replacement.
+    /// registrations and base-translation exclusions. These are never inlined,
+    /// because the splice would bypass the replacement.
     /// </summary>
     IReadOnlySet<uint>? LeafInliningBlockedTargets = null,
     int LeafInliningMaxCalleeInstructions = 56,
@@ -452,11 +442,6 @@ public sealed class FunctionTranslator
                 irBlocks.Add(new IrBasicBlock("return", new IrInstruction[] { new IrReturn(null) }));
             }
         }
-        if (options.LinkedCallFallthroughLrOverrides is { Count: > 0 })
-        {
-            irBlocks = ApplyLinkedCallFallthroughLrOverrides(irBlocks, options.LinkedCallFallthroughLrOverrides);
-        }
-
         var functionName = options.PreferredName ?? $"func_{entryPoint:X8}";
         var entryLabel = LabelFor(entryPoint);
         var hasEntryBlock = false;
@@ -488,7 +473,7 @@ public sealed class FunctionTranslator
         TranslationOptions options,
         TranslationMetrics metrics)
     {
-        if (!IsLeafInliningEligibleCaller(options))
+        if (!options.EnableLeafInlining)
         {
             return function;
         }
@@ -542,8 +527,7 @@ public sealed class FunctionTranslator
                     PreferredName = null,
                     MaxInstructions = Math.Min(options.MaxInstructions, maximum),
                     MaxBytes = Math.Min(options.MaxBytes, maximum * 4),
-                    EnableLeafInlining = false,
-                    LinkedCallFallthroughLrOverrides = null
+                    EnableLeafInlining = false
                 };
                 var calleeIr = BuildLinearIr(
                     disassembler,
@@ -578,19 +562,6 @@ public sealed class FunctionTranslator
         metrics.InlinedGuestInstructions = inlined.InlinedGuestInstructions;
         return inlined.Function;
     }
-
-    /// <summary>
-    /// Excludes bodies whose call sites carry extra structure (continuation/non-returning dispatch
-    /// labels keyed by guest address, module link-address remapping) that can't survive duplication.
-    /// </summary>
-    private static bool IsLeafInliningEligibleCaller(TranslationOptions options) =>
-        options.EnableLeafInlining &&
-        options.LrContinuationCallTargets is not { Count: > 0 } &&
-        options.NonReturningCallTargets is not { Count: > 0 } &&
-        options.LinkedCallFallthroughLrOverrides is not { Count: > 0 } &&
-        options.ModuleLinkBase is null &&
-        options.ModuleGuestBase is null &&
-        !options.EmitModRegistration;
 
     private FunctionTranslationResult FinishTranslation(
         uint entryPoint,
@@ -728,25 +699,16 @@ public sealed class FunctionTranslator
             ssa,
             signature,
             types,
-            options.EmitModRegistration,
-            options.ModRegistrationPriority,
-            options.ModRegistrationModuleId,
-            options.NonReturningCallTargets,
-            options.LrContinuationCallTargets,
             options.GuestAbiContracts,
             options.EmitStateFreeLeafVariant,
             options.StateFreeAbiContracts,
             options.StateFreeCallSymbols,
             options.StateFreeCallSiteVariants,
             options.StateFreeEntryVariants,
-            options.ModuleLinkBase,
-            options.ModuleGuestBase,
-            options.ModuleLinkedCodeSize,
             gqrEntryConstants: options.GqrEntryConstants,
             gqrCalleeWriteMasks: options.GqrCalleeWriteMasks,
             gqrConstantsRequireRuntimeGuard: options.GqrConstantsRequireRuntimeGuard,
-            enableLeafAbiSpillElision: options.EnableLeafAbiSpillElision,
-            modOverridableCallTargets: options.ModOverridableCallTargets);
+            enableLeafAbiSpillElision: options.EnableLeafAbiSpillElision);
     }
 
     private static IrTracePpc CreateTrace(PpcInstruction instruction)
@@ -808,36 +770,7 @@ public sealed class FunctionTranslator
         }
     }
 
-    private static string Base(string name) => RegisterNameUtils.StripNumericSuffix(name);
-
     private static string LabelFor(uint address) => $"0x{address:X8}";
-
-    private static List<IrBasicBlock> ApplyLinkedCallFallthroughLrOverrides(
-        IReadOnlyList<IrBasicBlock> blocks,
-        IReadOnlyDictionary<uint, uint> overrides)
-    {
-        var rewritten = new List<IrBasicBlock>(blocks.Count);
-        foreach (var block in blocks)
-        {
-            var instructions = block.Instructions.ToArray();
-            var changed = false;
-            for (var i = 0; i + 1 < instructions.Length; i++)
-            {
-                if (instructions[i] is IrAssign { Value.Kind: "const", Value.Constant: { } lrValue } assign &&
-                    string.Equals(Base(assign.Destination), "lr", StringComparison.OrdinalIgnoreCase) &&
-                    instructions[i + 1] is IrCall &&
-                    overrides.TryGetValue(unchecked((uint)lrValue), out var overrideLr))
-                {
-                    instructions[i] = assign with { Value = IrValue.Imm(unchecked((int)overrideLr)) };
-                    changed = true;
-                }
-            }
-
-            rewritten.Add(changed ? new IrBasicBlock(block.Label, instructions) : block);
-        }
-
-        return rewritten;
-    }
 
     private static bool TryBuildSyntheticBlock(string label, IReadOnlySet<string> localLabels, out IrBasicBlock block)
     {

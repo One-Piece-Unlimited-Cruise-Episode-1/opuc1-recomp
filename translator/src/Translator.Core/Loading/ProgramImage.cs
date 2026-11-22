@@ -1,6 +1,3 @@
-using Translator.Core.Parsing.Dol;
-using Translator.Core.Parsing.Rel;
-
 namespace Translator.Core.Loading;
 
 public sealed class ProgramImage
@@ -9,14 +6,12 @@ public sealed class ProgramImage
         byte[] memory,
         AddressRange usedRange,
         AddressRange dolRange,
-        AddressRange relRange,
         string sha256,
         uint memoryBase = MemoryLayout.RamBase)
     {
         Memory = memory;
         UsedRange = usedRange;
         DolRange = dolRange;
-        RelRange = relRange;
         Sha256 = sha256;
         MemoryBase = memoryBase;
     }
@@ -26,8 +21,6 @@ public sealed class ProgramImage
     public uint MemoryEnd => checked(MemoryBase + (uint)Memory.Length);
     public AddressRange UsedRange { get; }
     public AddressRange DolRange { get; }
-    public AddressRange RelRange { get; }
-    public bool HasRel => RelRange.End > RelRange.Start;
     public string Sha256 { get; }
 
     public bool Contains(uint address, int size = 1)

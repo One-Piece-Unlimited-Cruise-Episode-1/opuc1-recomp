@@ -18,7 +18,7 @@ public static class ChecksumUtilities
     public static string ToHex(ReadOnlySpan<byte> hash) =>
         Convert.ToHexString(hash).ToLowerInvariant();
 
-    /// <summary>Streams the file rather than materializing it, so hashing a REL costs no copy.</summary>
+    /// <summary>Streams the file rather than materializing it, so hashing a DOL costs no copy.</summary>
     public static string Sha256HexOfFile(string path)
     {
         using var stream = File.OpenRead(path);

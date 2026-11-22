@@ -56,11 +56,6 @@ public:
     // translator integration-test harnesses emit calls to it.
     static void Init(size_t mem1Size);
     static void Reset();
-    // Executable ranges are normally registered during startup. Rebuild the
-    // writable fast-path classification after each registration so a page
-    // previously classified as ordinary data cannot retain a stale direct
-    // write bias.
-    static void RefreshWritableFastPathsForExecutableRanges();
 
     static uint8_t Read8(uint32_t addr);
     static uint16_t Read16(uint32_t addr);

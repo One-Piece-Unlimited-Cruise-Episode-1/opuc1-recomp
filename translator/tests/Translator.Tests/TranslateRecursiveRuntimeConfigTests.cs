@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Translator.Cli.Configuration;
-using Translator.Core.Mods;
+using Translator.Core.Build;
 using Xunit;
 
 namespace Translator.Tests;

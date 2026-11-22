@@ -108,7 +108,6 @@ internal static class TranslatorCppTestHarness
             memory,
             new AddressRange(MemoryLayout.RamBase, checked(MemoryLayout.RamBase + (uint)memory.Length)),
             new AddressRange(MemoryLayout.RamBase, checked(MemoryLayout.RamBase + (uint)memory.Length)),
-            new AddressRange(0, 0),
             sha256: "test");
     }
 

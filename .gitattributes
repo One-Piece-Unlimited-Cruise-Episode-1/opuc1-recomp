@@ -3,16 +3,10 @@
 
 # Windows scripts keep CRLF
 *.ps1 text eol=crlf
-*.bat text eol=crlf
-
-# Patch files must stay LF: git apply matches context bytes against LF upstream sources
-*.patch -text
 
 # Binary assets
 *.bin binary
 *.db binary
-*.ico binary
-*.icns binary
 *.png binary
 
 # Generated tables

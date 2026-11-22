@@ -76,8 +76,8 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
    on four addresses, one of them `VISetPreRetraceCallback`). `build-function-map.mjs` now drops names matched at
    more than one address; single-address false matches are still possible, so each library batch confirms its
    bindings in Ghidra.
-7. Strip the remaining MKWii-only modules as they come up (`boot_race`, `strap_scene`, `egg_decomp`, `gx_egg`,
-   `task_thread`, `friend_code_keyboard`, `motion_trick*`, `recomp_mod_loader`, `product/retro_rewind_product`).
+7. Strip what is left of the inherited Mario Kart extras: the GameCube-pad
+   input stack (`input_bindings`, `input_expr`, `motion_trick*`, mapping wizard), real Wii Remote support, Crypto++.
 8. M4b: serve the disc from `data/opuc1.iso` with nod (aurora already fetches it for `aurora_dvd`): open the DATA
    partition, publish its FST at 0x80000038, read files through `nod_partition_open_file`.
 

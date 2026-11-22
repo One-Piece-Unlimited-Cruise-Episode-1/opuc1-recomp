@@ -3,7 +3,6 @@ using System.IO;
 using Translator.Core;
 using Translator.Core.CodeGen;
 using Translator.Core.Parsing.Dol;
-using Translator.Core.Parsing.Rel;
 using Xunit;
 
 namespace Translator.Tests;
@@ -57,7 +56,7 @@ public class SdaAndGeneratorTests
     }
 
     [Fact]
-    public void DataSectionGeneratorEmbedsDolAndRelSections()
+    public void DataSectionGeneratorEmbedsDolSections()
     {
         var dol = SyntheticDolFactory.Create(
             0x80004000,
@@ -69,20 +68,17 @@ public class SdaAndGeneratorTests
                 SyntheticDolFactory.Data(5, 0x80008000, 0xAA, 0xBB, 0xCC)
             ]);
 
-        var rel = new RelImage(new byte[] { 0x11, 0x22, 0x33 }, 0x80510000);
         var tempDir = Path.Combine(Path.GetTempPath(), "mkw_data_section_tests");
         Directory.CreateDirectory(tempDir);
         var output = Path.Combine(tempDir, "data_sections_init_test.cpp");
 
-        DataSectionGenerator.Generate(dol, rel, output);
+        DataSectionGenerator.Generate(dol, output);
         var text = File.ReadAllText(output);
 
         Assert.Contains("kData__data", text);
-        Assert.Contains("kData_rel_module", text);
         Assert.Contains("InitializeDataSections", text);
         Assert.Contains("g_dataInitialized", text);
         Assert.Contains("0x80008000", text);
-        Assert.Contains("0x80510000", text);
     }
 
     [Fact]
@@ -101,7 +97,7 @@ public class SdaAndGeneratorTests
         Directory.CreateDirectory(tempDir);
         var output = Path.Combine(tempDir, "data_sections_init_overlap_test.cpp");
 
-        DataSectionGenerator.Generate(dol, rel: null, output);
+        DataSectionGenerator.Generate(dol, output);
         var text = File.ReadAllText(output);
 
         Assert.Contains("0x80008020", text);
@@ -127,7 +123,6 @@ public class SdaAndGeneratorTests
 
             DataSectionGenerator.Generate(
                 dol,
-                rel: null,
                 output,
                 blobReferenceDirectory: finalBlobDirectory);
 
@@ -156,14 +151,14 @@ public class SdaAndGeneratorTests
             var first = SyntheticDolFactory.Create(
                 0x80004000,
                 sections: [SyntheticDolFactory.Data(5, 0x80008000, 1, 2, 3, 4)]);
-            DataSectionGenerator.Generate(first, rel: null, output);
+            DataSectionGenerator.Generate(first, output);
             var assemblyPath = Path.Combine(tempDir, "data_sections_init_blobs.S");
             var before = File.ReadAllText(assemblyPath);
 
             var second = SyntheticDolFactory.Create(
                 0x80004000,
                 sections: [SyntheticDolFactory.Data(5, 0x80008000, 1, 2, 3, 5)]);
-            DataSectionGenerator.Generate(second, rel: null, output);
+            DataSectionGenerator.Generate(second, output);
             var after = File.ReadAllText(assemblyPath);
 
             Assert.NotEqual(before, after);

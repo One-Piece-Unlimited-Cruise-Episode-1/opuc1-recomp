@@ -34,9 +34,6 @@ inline constexpr uint32_t kPageSize = 1u << kPageShift;
 inline constexpr uint32_t kPageMask = kPageSize - 1u;
 inline constexpr uint32_t kPageCount = 1u << (32 - kPageShift);
 inline constexpr uint32_t kMaxFastScalarSize = 8;
-inline constexpr uint32_t kWritableSubPageShift = RecompMod::kExecutableWriteGuardPageShift;
-inline constexpr uint32_t kWritableSubPageSize = 1u << kWritableSubPageShift;
-inline constexpr uint32_t kWritableSubPagesPerPage = kPageSize / kWritableSubPageSize;
 
 struct PageEntry {
     uint8_t* base = nullptr;
@@ -55,14 +52,6 @@ extern uintptr_t g_fullReadablePageBias[kPageCount];
 // Executable-range registration invalidates entries before guest execution.
 extern uintptr_t g_fullWritablePageBias[kPageCount];
 
-// Allocated only for mapped 1 MiB pages that contain both executable and data
-// 4 KiB pages. Entries use the same encoded host bias as the coarse table.
-// Exact executable bits remain authoritative and are checked at lookup time,
-// including both sides of a cross-4-KiB access.
-struct SparseWritablePageTable {
-    uintptr_t encodedBias[kWritableSubPagesPerPage]{};
-};
-extern const SparseWritablePageTable* g_sparseWritablePageTables[kPageCount];
 
 // Nonzero while any registered deferred read overlaps the page. Small
 // mappings (e.g. the 16 KiB locked cache) have no coarse bias entry, so a
@@ -166,59 +155,22 @@ inline uint8_t* GetPointerFast(uint32_t address, size_t length) {
 
 MKW_MEMORY_FORCE_INLINE bool TryGetWritablePointerFast(
     uint32_t address, size_t length, uint8_t*& pointer) {
-    // The sparse-table hit below distinguishes itself from the small-mapping
-    // hit through `pointer`, so the out-parameter must start null regardless
-    // of what the caller passed in. (A caller handing in an uninitialized
-    // pointer used to turn every sparse hit into a write through stack
-    // garbage - random host memory corruption.)
     pointer = nullptr;
     if (length == 0 || length > 8 || address > UINT32_MAX - (length - 1))
         return false;
     const uint32_t coarsePage = address >> kPageShift;
-    uintptr_t encodedBias = g_fullWritablePageBias[coarsePage];
-    const uint32_t endAddress = address + static_cast<uint32_t>(length - 1);
-    const uint32_t firstExactPage = address >> kWritableSubPageShift;
-    const uint32_t lastExactPage = endAddress >> kWritableSubPageShift;
-    if (encodedBias != 0 && (endAddress >> kPageShift) != coarsePage &&
-        RecompMod::g_executableWriteGuardPages[lastExactPage].load(
-            std::memory_order_relaxed) != 0) {
-        return false;
-    }
+    const uintptr_t encodedBias = g_fullWritablePageBias[coarsePage];
     if (encodedBias == 0) {
-        const auto* subTable = g_sparseWritablePageTables[coarsePage];
-        if (subTable != nullptr) {
-            encodedBias = subTable->encodedBias[
-                (address & kPageMask) >> kWritableSubPageShift];
-            if (encodedBias == 0)
-                return false;
-        } else {
-            // Small mappings such as Broadway's 16 KiB locked cache cannot
-            // populate the full-1-MiB bias table. Keep them native by proving
-            // the exact access against the ordinary page entry, then applying
-            // the same executable-write policy as a sparse-table hit.
-            const uint32_t offset = address & kPageMask;
-            const auto& entry = g_pageTable[coarsePage];
-            if (!entry.base || offset > entry.limit || length > entry.limit - offset)
-                return false;
-            pointer = entry.base + offset;
-        }
-
-        // The exact 4 KiB guard is the final authority. Checking it on every
-        // checked/sparse hit also makes later executable-range registration
-        // safe when a prebuilt table still contains the old mapped bias.
-        if (RecompMod::g_executableWriteGuardPages[firstExactPage].load(
-                std::memory_order_relaxed) != 0 ||
-            (lastExactPage != firstExactPage &&
-             RecompMod::g_executableWriteGuardPages[lastExactPage].load(
-                 std::memory_order_relaxed) != 0)) {
+        // Small mappings such as Broadway's 16 KiB locked cache cannot
+        // populate the full-1-MiB bias table. Keep them native by proving
+        // the exact access against the ordinary page entry.
+        const uint32_t offset = address & kPageMask;
+        const auto& entry = g_pageTable[coarsePage];
+        if (!entry.base || offset > entry.limit || length > entry.limit - offset)
             return false;
-        }
-
-        if (pointer != nullptr)
-            return true;
+        pointer = entry.base + offset;
+        return true;
     }
-    if (encodedBias == 0)
-        return false;
     pointer = reinterpret_cast<uint8_t*>((encodedBias - 1u) + address);
     return true;
 }

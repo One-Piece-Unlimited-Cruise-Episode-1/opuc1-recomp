@@ -15,8 +15,7 @@ public sealed record GuestStateFreeEmissionFacts(
     uint GprInputMask);
 
 /// <summary>
-/// Build registration facts for one emitted function. Present only for the base
-/// (non-mod) registration form.
+/// Build registration facts for one emitted function.
 /// </summary>
 public sealed record CxxBuildRegistrationFacts(
     string Symbol,
@@ -25,7 +24,7 @@ public sealed record CxxBuildRegistrationFacts(
 
 /// <summary>
 /// Structured result of emitting one function: the C++ text plus every fact the emitter derived, for same-process
-/// consumers. The comment markers in <see cref="Code"/> remain the cross-run persistence format for build sharding and dispatch profiles.
+/// consumers. The comment markers in <see cref="Code"/> remain the cross-run persistence format for build sharding.
 /// </summary>
 public sealed record CxxEmissionResult(
     string Code,

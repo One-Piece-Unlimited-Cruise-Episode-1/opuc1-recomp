@@ -54,7 +54,6 @@ public class LeafInliningTests
             memory,
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, ImageSize),
             AddressRange.FromStartAndSize(MemoryLayout.RamBase, ImageSize),
-            default,
             "leaf-inlining");
     }
 
@@ -212,7 +211,7 @@ public class LeafInliningTests
     [Fact]
     public void TheStandaloneCalleeBodyIsStillTranslatedOnItsOwn()
     {
-        // Indirect dispatch, mod overrides and the registry all resolve the
+        // Indirect dispatch, native overrides and the registry all resolve the
         // callee by address, so the splice must never be a replacement for it.
         var image = BuildImage(
             [
@@ -599,8 +598,8 @@ public class LeafInliningTests
     [Fact]
     public void ABlockedAddressAnywhereInsideTheCalleeIsRejected()
     {
-        // A native registration or mod patch inside the decoded body means the
-        // runtime winner is not these bytes.
+        // A native registration inside the decoded body means the runtime
+        // winner is not these bytes.
         var image = BuildImage(
             [
                 .. SimpleCaller(),
@@ -641,47 +640,6 @@ public class LeafInliningTests
 
         Assert.Equal(3, generous);
         Assert.InRange(stingy, 0, 2);
-    }
-
-    [Fact]
-    public void ContinuationDispatchDisablesInliningForTheWholeCaller()
-    {
-        // Non-returning and continuation call sites place labels keyed by guest
-        // instruction address inside the emitted body; a duplicated guest
-        // instruction stream cannot coexist with that.
-        var image = BuildImage(
-            [
-                .. SimpleCaller(),
-                (Callee + 0, Lwz(3, 3, 8)),
-                (Callee + 4, Blr())
-            ]);
-
-        var options = Options() with
-        {
-            LrContinuationCallTargets = new HashSet<uint> { Callee2 }
-        };
-
-        Assert.Equal(0, Translate(image, Caller, options).Metrics.InlinedCallSites);
-    }
-
-    [Fact]
-    public void ModuleTranslationsAreNeverInlined()
-    {
-        var image = BuildImage(
-            [
-                .. SimpleCaller(),
-                (Callee + 0, Lwz(3, 3, 8)),
-                (Callee + 4, Blr())
-            ]);
-
-        var options = Options() with
-        {
-            ModuleLinkBase = 0x80800000u,
-            ModuleGuestBase = 0x80900000u,
-            ModuleLinkedCodeSize = 0x1000
-        };
-
-        Assert.Equal(0, Translate(image, Caller, options).Metrics.InlinedCallSites);
     }
 
     [Fact]

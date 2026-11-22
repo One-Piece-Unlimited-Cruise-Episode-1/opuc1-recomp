@@ -7,8 +7,27 @@ public sealed class ProductionTranslationPolicyTests
     {
         var repositoryRoot = ProjectPathsForTests.FindRepositoryRoot();
         var productionProject = File.ReadAllText(
-            Path.Combine(repositoryRoot, "projects", "mkwii", "recomp.yml"));
+            Path.Combine(repositoryRoot, "projects", "opuc1", "recomp.yml"));
         Assert.Contains("allow_unsupported_instructions: false", productionProject, StringComparison.Ordinal);
         Assert.DoesNotContain("allow_unsupported_instructions: true", productionProject, StringComparison.Ordinal);
+    }
+}
+
+internal static class ProjectPathsForTests
+{
+    public static string FindRepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "translator", "Translator.sln")) &&
+                File.Exists(Path.Combine(dir.FullName, "projects", "opuc1", "recomp.yml")))
+            {
+                return dir.FullName;
+            }
+            dir = dir.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not find repository root.");
     }
 }

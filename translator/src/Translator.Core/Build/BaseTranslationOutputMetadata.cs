@@ -4,18 +4,17 @@ using Translator.Core.IO;
 using Translator.Core.Translation;
 using Translator.Core.Loading;
 
-namespace Translator.Core.Mods;
+namespace Translator.Core.Build;
 
 /// <summary>Compact, deterministic description of a base translation output tree, the source of truth
-/// for downstream manifests and pruning so they don't need to parse tens of thousands of C++ files.</summary>
+/// for build sharding and pruning so they don't need to parse tens of thousands of C++ files.</summary>
 public sealed record BaseTranslationOutputMetadata(
     string Format,
     int FormatVersion,
     string? TranslationIdentityHash,
     TranslationQualityMetadata Quality,
     IReadOnlyList<BaseTranslationFunctionMetadata> Functions,
-    string? SourceBundlePath = null,
-    IReadOnlyList<BaseTranslationModPatchAwareness>? ModPatchAwareness = null)
+    string? SourceBundlePath = null)
 {
     public const string CurrentFormat = "mkw-base-translation-output";
     public const int CurrentFormatVersion = 2;
@@ -24,8 +23,7 @@ public sealed record BaseTranslationOutputMetadata(
         IEnumerable<BaseTranslationFunctionMetadata> functions,
         TranslationQualityMetadata quality,
         string? translationIdentityHash = null,
-        string? sourceBundlePath = null,
-        IReadOnlyList<BaseTranslationModPatchAwareness>? modPatchAwareness = null)
+        string? sourceBundlePath = null)
     {
         var ordered = functions
             .OrderBy(function => function.RelativePath, StringComparer.Ordinal)
@@ -51,8 +49,7 @@ public sealed record BaseTranslationOutputMetadata(
             translationIdentityHash,
             quality,
             ordered,
-            sourceBundlePath,
-            modPatchAwareness);
+            sourceBundlePath);
     }
 
     public void RequireReleaseEligible(string source)
@@ -83,15 +80,6 @@ public sealed record TranslationQualityMetadata(
     }
 }
 
-/// <summary>
-/// Records that the base translation knows one mod profile's patch set (leaf-inlining blocks and
-/// residency fences at every address the mod can win). A mod translation must refuse a base tree
-/// whose awareness doesn't cover its own Code.pul, or it silently bakes in vanilla code paths.
-/// </summary>
-public sealed record BaseTranslationModPatchAwareness(
-    string Profile,
-    string CodePulSha256);
-
 public sealed record BaseTranslationFunctionMetadata(
     string RelativePath,
     long Size,
@@ -100,9 +88,8 @@ public sealed record BaseTranslationFunctionMetadata(
     IReadOnlyList<uint> LocalLabelAddresses,
     BaseTranslationFunctionBuildMetadata? Build = null,
     // True for a fall-through interior address (e.g. a split-switch artifact) that another
-    // translated function's control flow already executes. Registered and dispatchable, but the
-    // base manifest must not let it split function ranges: patches have to rebuild the enclosing
-    // function since every real caller runs its inline copy of the bytes, not this alias.
+    // translated function's control flow already executes. Registered and dispatchable, but every
+    // real caller runs the enclosing function's inline copy of the bytes, not this alias.
     bool InteriorToOtherTranslation = false)
 {
     public static BaseTranslationFunctionMetadata FromTranslation(

@@ -1,22 +1,13 @@
 using System;
 using System.Linq;
 using Translator.Core.Parsing.Dol;
-using Translator.Core.Parsing.Rel;
 
 namespace Translator.Core.Loading;
 
 public sealed class ProgramImageBuilder
 {
-    public ProgramImage Build(string dolPath, string relPath, uint relBaseAddress)
-    {
-        var dol = DolFile.Load(dolPath);
-        var rel = RelFile.Load(relPath).BuildImage(relBaseAddress);
-        return Build(dol, rel);
-    }
-
     public ProgramImage Build(
         DolFile dol,
-        RelImage? rel = null,
         uint ramBase = MemoryLayout.RamBase,
         int ramSize = MemoryLayout.RamSize)
     {
@@ -58,23 +49,7 @@ public sealed class ProgramImageBuilder
             section.Data.Span.CopyTo(ram.AsSpan(offset, (int)section.Size));
         }
 
-        var relRange = new AddressRange(0, 0);
-        if (rel is not null)
-        {
-            var relOffset = checked((int)(rel.BaseAddress - ramBase));
-            var relEnd = relOffset + rel.Data.Length;
-            if (relOffset < 0 || relEnd > ram.Length)
-            {
-                throw new InvalidOperationException($"REL image spills outside RAM window (offset {relOffset}, end {relEnd})");
-            }
-
-            rel.Data.CopyTo(ram, relOffset);
-            relRange = rel.Range;
-        }
-
-        var usedRange = rel is null ? dol.MemoryRange : AddressRange.Union(dol.MemoryRange, rel.Range);
-
         var sha = ChecksumUtilities.Sha256Hex(ram);
-        return new ProgramImage(ram, usedRange, dol.MemoryRange, relRange, sha, ramBase);
+        return new ProgramImage(ram, dol.MemoryRange, dol.MemoryRange, sha, ramBase);
     }
 }

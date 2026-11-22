@@ -1,7 +1,6 @@
 #include "abi_bridge.h"
 #include "system_bridge.h"
 #include "memory_slow_test_support.h"
-#include "recomp_mod_loader.h"
 #include "runtime_product.h"
 
 #include <iostream>
@@ -42,16 +41,9 @@ uint32_t MemoryInline::Read32Slow(uint32_t address) {
 }
 void MemoryInline::Write32Slow(uint32_t address, uint32_t value) { g_words[address] = value; }
 
-namespace RecompMod {
-const std::vector<MemoryReservation>& MemoryReservations() {
-    static const std::vector<MemoryReservation> empty;
-    return empty;
-}
-uint32_t CurrentTranslatedExecutionAddress() noexcept { return 0; }
-}
 namespace RuntimeProduct {
 const Descriptor& Active() noexcept {
-    static const Descriptor descriptor{Kind::BaseGame, "test"};
+    static const Descriptor descriptor{"test"};
     return descriptor;
 }
 }

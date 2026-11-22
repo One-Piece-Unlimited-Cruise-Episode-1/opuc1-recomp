@@ -18,17 +18,13 @@ public class FlagElisionCodeGenTests
 {
     private static string Emit(
         IrFunction function,
-        IReadOnlyDictionary<uint, GuestAbiContract>? guestAbiContracts = null,
-        IReadOnlySet<uint>? modOverridableCallTargets = null,
-        IReadOnlySet<uint>? lrContinuationCallTargets = null) =>
+        IReadOnlyDictionary<uint, GuestAbiContract>? guestAbiContracts = null) =>
         new CxxLinearCodeGenerator().Emit(
             0x80001000u,
             new SsaTransformer().Convert(function),
             new FunctionAbiClassification(function.Name, ValueRepresentation.Void),
             new RepresentationEnvironment(new Dictionary<string, ValueRepresentation>()),
-            guestAbiContracts: guestAbiContracts,
-            lrContinuationCallTargets: lrContinuationCallTargets,
-            modOverridableCallTargets: modOverridableCallTargets);
+            guestAbiContracts: guestAbiContracts);
 
     private static GuestAbiContract Contract(
         bool readsLr = false,
@@ -291,33 +287,6 @@ public class FlagElisionCodeGenTests
 
         Assert.DoesNotContain("static_cast<int32_t>(r3) == static_cast<int32_t>(0)", code, StringComparison.Ordinal);
         Assert.Contains("SetCRResident(cr, xer, 0, static_cast<int32_t>(r3)", code, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void NoFlagIsElidedInABodyThatCanResumeThroughALinkRegisterDispatch()
-    {
-        // A callee that returns into one of this function's own labels makes the
-        // static CFG incomplete, so every flag statement derived from it is void.
-        var function = new IrFunction("lr_continuation", "entry", new[]
-        {
-            new IrBasicBlock("entry", new IrInstruction[]
-            {
-                new IrAssign("lr", IrValue.Imm(0x80001010)),
-                new IrCall(string.Empty, "0x80002000", Array.Empty<IrValue>()),
-                new IrSetCrField(0, IrValue.Register("r3"), IrValue.Imm(0), false),
-                new IrBranch("beq", "taken", "fallthrough", "cr0")
-            }),
-            Cr0KillingExit("taken", "r4"),
-            Cr0KillingExit("fallthrough", "r5")
-        });
-
-        var code = Emit(
-            function,
-            guestAbiContracts: new Dictionary<uint, GuestAbiContract> { [0x80002000u] = Contract() },
-            lrContinuationCallTargets: new HashSet<uint> { 0x80002000u });
-
-        Assert.Equal(3, CountOccurrences(code, "SetCRResident("));
-        Assert.Contains("ctx->lr = 2147487760;", code, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -621,17 +590,6 @@ public class FlagElisionCodeGenTests
             {
                 [0x80002000u] = Contract(flags: flags)
             });
-
-        Assert.Contains("ctx->lr = 2147487760;", code, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void LinkRegisterStoreIsKeptForAModOverridableCallee()
-    {
-        var code = Emit(
-            CallWithLinkRegister("mod_callee", 0x80002000u),
-            guestAbiContracts: new Dictionary<uint, GuestAbiContract> { [0x80002000u] = Contract() },
-            modOverridableCallTargets: new HashSet<uint> { 0x80002000u });
 
         Assert.Contains("ctx->lr = 2147487760;", code, StringComparison.Ordinal);
     }

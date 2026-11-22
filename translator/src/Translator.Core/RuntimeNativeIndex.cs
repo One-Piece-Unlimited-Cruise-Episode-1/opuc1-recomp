@@ -11,19 +11,7 @@ public sealed record RuntimeNativeRegistration(
     string Symbol,
     string SourceFile,
     bool IsTranslatedOverride,
-    bool ExcludesBaseTranslation,
-    NativeModOverlay ModOverlay = NativeModOverlay.Unspecified);
-
-/// <summary>What happens to a mod overlay at a native's address.</summary>
-public enum NativeModOverlay
-{
-    /// <summary>Plain registration: the overlay is lost, and reported as such.</summary>
-    Unspecified,
-    /// <summary>The native calls through to the overlay (<c>MKW_GUEST_NEXT</c>).</summary>
-    Wrapper,
-    /// <summary>The native deliberately takes over the overlay's address.</summary>
-    Replacement
-}
+    bool ExcludesBaseTranslation);
 
 public sealed record RuntimeNativeAbiEntry(
     uint Address,
@@ -55,22 +43,6 @@ public sealed record RuntimeNativeIndex(
             .Select(static entry => entry.Address).ToHashSet();
         return new RuntimeNativeGuestEffectSet(contracts, precise, conservative);
     }
-
-    /// <summary>
-    /// The index is keyed by the PAL addresses the runtime sources name; this is the same index
-    /// keyed by <paramref name="region"/>'s addresses. Every address must have a counterpart in that region.
-    /// </summary>
-    public RuntimeNativeIndex ForRegion(GuestAddressTable table, GuestRegion region) => new(
-        Registrations.Select(entry => entry with { Address = table.Map(entry.Address, region) }).ToArray(),
-        VoidStubAbis.Select(entry => entry with { Address = table.Map(entry.Address, region) }).ToArray(),
-        Effects.Select(entry => entry with
-        {
-            Address = table.Map(entry.Address, region),
-            Contract = entry.Contract with
-            {
-                DirectCallTargets = entry.Contract.DirectCallTargets.Select(target => table.Map(target, region)).ToArray()
-            }
-        }).ToArray());
 }
 
 public static class RuntimeNativeIndexBuilder
@@ -131,17 +103,7 @@ public static class RuntimeNativeIndexBuilder
         {
             var source = sourceFile.Content;
             foreach (Match match in GeneratedMarkers.NativeFunctionRegistrationPattern().Matches(source))
-            {
-                var modOverlay = match.Groups["modOverlay"];
-                Add(match, match.Groups["symbol"].Value, false,
-                    !match.Groups["as"].Success && !modOverlay.Success,
-                    modOverlay.Value switch
-                    {
-                        "WRAPPER" => NativeModOverlay.Wrapper,
-                        "REPLACEMENT" => NativeModOverlay.Replacement,
-                        _ => NativeModOverlay.Unspecified
-                    });
-            }
+                Add(match, match.Groups["symbol"].Value, false, !match.Groups["as"].Success);
             foreach (Match match in GeneratedMarkers.TranslatedFunctionRegistrationPattern().Matches(source))
                 Add(match, match.Groups["symbol"].Value, true, true);
             foreach (Match match in GeneratedMarkers.NativeOverridePattern().Matches(source))
@@ -149,11 +111,10 @@ public static class RuntimeNativeIndexBuilder
             foreach (Match match in GeneratedMarkers.FatalStubPattern().Matches(source))
                 Add(match, $"GX_FATAL_STUB_{match.Groups["address"].Value}", false, true);
 
-            void Add(Match match, string symbol, bool translated, bool excludesBase,
-                NativeModOverlay modOverlay = NativeModOverlay.Unspecified) =>
+            void Add(Match match, string symbol, bool translated, bool excludesBase) =>
                 registrations.Add(new RuntimeNativeRegistration(
                     ParseAddress(match.Groups["address"].Value), symbol, sourceFile.RelativePath,
-                    translated, excludesBase, modOverlay));
+                    translated, excludesBase));
         }
 
         return registrations
@@ -162,8 +123,7 @@ public static class RuntimeNativeIndexBuilder
             .ThenBy(static registration => registration.Symbol, StringComparer.Ordinal)
             .ThenBy(static registration => registration.SourceFile, StringComparer.Ordinal)
             .ThenBy(static registration => registration.IsTranslatedOverride)
-            .ThenBy(static registration => registration.ExcludesBaseTranslation)
-            .ThenBy(static registration => registration.ModOverlay);
+            .ThenBy(static registration => registration.ExcludesBaseTranslation);
     }
 
     private static uint ParseAddress(string value) => GuestTargetParser.ParseHexAddress(value);

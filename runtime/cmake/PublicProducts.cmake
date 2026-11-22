@@ -133,32 +133,6 @@ if(MKW_BASE_PORTABLE_SENSITIVE_SHARDS)
     target_precompile_headers(mkw_base_sensitive REUSE_FROM mkw_base_shared)
 endif()
 
-if(MKW_HAVE_RETRO_REWIND)
-    if(MKW_RETRO_PORTABLE_SENSITIVE_SHARDS)
-        add_library(mkw_retro_sensitive OBJECT ${MKW_RETRO_PORTABLE_SENSITIVE_SHARDS})
-        mkw_configure_translated_target(mkw_retro_sensitive)
-        target_precompile_headers(mkw_retro_sensitive REUSE_FROM mkw_base_shared)
-    endif()
-
-    set(MKW_RETRO_TRANSLATED_SOURCES ${MKW_RETRO_MOD_SHARDS} ${MKW_RETRO_EXTRA_SOURCES})
-    set(MKW_RETRO_BLOB_OBJECTS)
-    foreach(source IN LISTS MKW_RETRO_EXTRA_SOURCES)
-        if(source MATCHES "\\.S$")
-            enable_language(ASM)
-            set_source_files_properties("${source}" PROPERTIES LANGUAGE ASM SKIP_PRECOMPILE_HEADERS ON)
-        endif()
-    endforeach()
-    # mod_data_patches (MKW_RETRO_EXTRA_SOURCES) calls runtime APIs directly; it
-    # keeps the full runtime include path this target already has.
-    add_library(mkw_retro_rewind_functions OBJECT ${MKW_RETRO_TRANSLATED_SOURCES})
-    mkw_configure_translated_target(mkw_retro_rewind_functions)
-    target_precompile_headers(mkw_retro_rewind_functions REUSE_FROM mkw_base_shared)
-
-    add_library(mkw_retro_registration OBJECT ${MKW_RETRO_REGISTRATION_SOURCES})
-    mkw_configure_translated_target(mkw_retro_registration)
-    target_precompile_headers(mkw_retro_registration REUSE_FROM mkw_base_shared)
-endif()
-
 function(mkw_configure_product target)
     if(TARGET mkw_runtime_common)
         target_sources(${target} PRIVATE $<TARGET_OBJECTS:mkw_runtime_common>)
@@ -217,7 +191,7 @@ function(mkw_configure_product target)
 
         set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE TRUE)
     elseif(MKW_PLATFORM_LINUX OR MKW_PLATFORM_MACOS_X86_64)
-        # mkw_runtime_common is an OBJECT library: opuc1_recomp/RetroRewind only pull in its .o
+        # mkw_runtime_common is an OBJECT library: opuc1_recomp only pulls in its .o
         # files via $<TARGET_OBJECTS:>, which does not propagate mkw_runtime_common's own
         # target_link_libraries (object libraries don't carry usage requirements to a consumer
         # that isn't itself linked against as a target). fiber_manager.cpp's co_* calls live in
@@ -310,29 +284,11 @@ if(TARGET mkw_base_sensitive)
     target_sources(opuc1_recomp PRIVATE $<TARGET_OBJECTS:mkw_base_sensitive>)
 endif()
 
-if(MKW_HAVE_RETRO_REWIND)
-    add_executable(RetroRewind "${MKW_RETRO_REWIND_PRODUCT_SOURCE}")
-    mkw_configure_product(RetroRewind)
-    mkw_add_product_icon(RetroRewind)
-    target_precompile_headers(RetroRewind REUSE_FROM opuc1_recomp)
-    target_sources(RetroRewind PRIVATE $<TARGET_OBJECTS:mkw_retro_registration>)
-    if(TARGET mkw_retro_sensitive)
-        target_sources(RetroRewind PRIVATE $<TARGET_OBJECTS:mkw_retro_sensitive>)
-    endif()
-    target_sources(RetroRewind PRIVATE $<TARGET_OBJECTS:mkw_retro_rewind_functions>)
-    if(MKW_RETRO_BLOB_OBJECTS)
-        target_sources(RetroRewind PRIVATE ${MKW_RETRO_BLOB_OBJECTS})
-    endif()
-    add_custom_target(mkw_release DEPENDS opuc1_recomp RetroRewind)
-else()
-    add_custom_target(mkw_release DEPENDS opuc1_recomp)
-    message(STATUS "RetroRewind target disabled (run translate-mod and emit-build-shards)")
-endif()
+add_custom_target(mkw_release DEPENDS opuc1_recomp)
 
 # mkw_runtime_common gets the same flags from mkw_add_runtime_library.
 set(MKW_ALL_BUILD_TARGETS
-    mkw_game_data mkw_base_shared mkw_base_registration mkw_base_sensitive mkw_retro_sensitive
-    mkw_retro_rewind_functions mkw_retro_registration opuc1_recomp RetroRewind)
+    mkw_game_data mkw_base_shared mkw_base_registration mkw_base_sensitive opuc1_recomp)
 foreach(target IN LISTS MKW_ALL_BUILD_TARGETS)
     if(TARGET ${target})
         mkw_apply_baseline_arch(${target})

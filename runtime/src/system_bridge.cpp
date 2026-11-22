@@ -20,10 +20,8 @@
 #include "abi_bridge.h"
 #include "memory.h"
 #include "ppc_runtime.h"
-#include "recomp_mod_loader.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
-#include "runtime_product.h"
 #include "timebase_contract.h"
 
 // Global flag to suppress SEH reporting during static constructor execution
@@ -275,7 +273,7 @@ void DumpGuestCrashHints(std::ostream& os, const CpuContext* cpu) {
         return;
     }
 
-    const uint32_t active = RecompMod::CurrentTranslatedExecutionAddress();
+    const uint32_t active = TranslatedExecution::CurrentAddress();
     if (active != 0) {
         os << "[runtime] Active translated target: ";
         PrintGuestValue(os, "guest", active);
@@ -377,52 +375,7 @@ void SystemBridge::Initialize() {
     }
     RT_LOG(RT_TAG_RUNTIME) << "Executed " << dolCount << " main DOL static constructors." << std::endl;
 
-    // StaticR.rel ctors must be run manually since we aren't using OSLink
-    RT_LOG(RT_TAG_RUNTIME) << "Running static constructors for StaticR.rel..." << std::endl;
-
-    // Define range for StaticR.rel .ctors
-    // OPUC has no StaticR.rel.
-    const uint32_t ctorStart = 0u;
-    const uint32_t ctorEnd = 0u;
-
-    int count = 0;
-    for (uint32_t addr = ctorStart; addr < ctorEnd; addr += 4) {
-        uint32_t funcAddr = 0;
-        try {
-            funcAddr = Memory::Read32(addr);
-        } catch (...) {
-            continue;
-        }
-
-        if (funcAddr == 0 || funcAddr == 0xFFFFFFFF) continue;
-
-        if (TranslatedFunctionRegistry::FindByAddressPtr(funcAddr)) {
-            MkwJmpBuf jumpBuf;
-            g_sehJumpTarget = &jumpBuf;
-            if (MKW_SETJMP(jumpBuf) == 0) {
-                cpu.gpr[1] = 0x81700000u;
-                try {
-                    InvokeIndirectCpu(funcAddr, &cpu);
-                    count++;
-                } catch (...) {
-                    RT_LOG(RT_TAG_RUNTIME) << "C++ exception invoking ctor 0x" << std::hex << funcAddr
-                              << std::dec << " - skipping." << std::endl;
-                }
-            } else {
-                RT_LOG(RT_TAG_RUNTIME) << "SEH Exception caught invoking ctor 0x" << std::hex << funcAddr
-                          << " code=0x" << g_sehLastExceptionCode
-                          << " at=0x" << g_sehLastExceptionAddress;
-                if (g_sehLastExceptionCode == 0xC0000005u && g_sehLastAccessedAddress != 0) {
-                    std::cerr << " " << (g_sehLastAccessType ? "write" : "read")
-                              << "=0x" << g_sehLastAccessedAddress;
-                }
-                std::cerr << std::dec << " - skipping." << std::endl;
-            }
-            g_sehJumpTarget = nullptr;
-        }
-    }
     g_suppressSehReporting = false;
-    RT_LOG(RT_TAG_RUNTIME) << "Executed " << count << " static constructors." << std::endl;
 }
 
 void SystemBridge::WriteGuestMemorySnapshot(std::ostream& os, const std::filesystem::path& mem1Path) {
@@ -448,13 +401,6 @@ void SystemBridge::WriteGuestMemorySnapshot(std::ostream& os, const std::filesys
         mem2Path += ".mem2";
         writeRegion("MEM2", kMem2Base, mem2Size, mem2Path);
         break;
-    }
-    constexpr uint32_t kKamekBase = 0x81800000u;
-    constexpr uint32_t kKamekSize = 0x00200000u;
-    if (Memory::Contains(kKamekBase, kKamekSize)) {
-        std::filesystem::path kamekPath = mem1Path;
-        kamekPath += ".kamek";
-        writeRegion("Kamek overlay", kKamekBase, kKamekSize, kamekPath);
     }
 }
 
@@ -532,23 +478,6 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
     entries.push_back({0x80000004u, 0x41460100u, "Disc maker/id"});  // OPUC: maker "AF" (boot.bin ROUPAF) + disc 1
     entries.push_back({0x80003180u, ::GuestRegion::CurrentFacts().gameCode, "OS app game code"});
     entries.push_back({0x80003194u, ::GuestRegion::CurrentFacts().gameCode, "OS app gamename"});
-    if (RuntimeProduct::IsRetroRewind()) {
-        entries.push_back({0x800017D8u, 0x00000001u, "Retro Rewind recomp runtime marker", true});
-    }
-
-    for (const auto& reservation : RecompMod::MemoryReservations()) {
-        if (reservation.start >= kMem1ArenaLoDefault &&
-            reservation.start < mem1ArenaHiDefault &&
-            reservation.end <= 0x81800000u) {
-            mem1ArenaHiDefault = reservation.start;
-            RT_LOG(RT_TAG_MOD) << "Reserved MEM1 range 0x" << std::hex << std::uppercase
-                      << reservation.start << "-0x" << reservation.end
-                      << " for " << reservation.name
-                      << "; MEM1 arena hi now 0x" << mem1ArenaHiDefault
-                      << std::dec << std::nouppercase << std::endl;
-        }
-    }
-
     // Seed OS clock values used by SDK timing helpers (OSBusClock/OSClock).
     entries.push_back({0x800000F8u, kBusClockHz, "__OSBusClock"});
     entries.push_back({0x800000FCu, kCpuClockHz, "__OSClock"});

@@ -103,25 +103,13 @@ public sealed partial class CxxLinearCodeGenerator
         IrFunction function,
         IrCfg cfg,
         RepresentationEnvironment types,
-        IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts,
-        IReadOnlySet<uint> modOverridableCallTargets,
-        IReadOnlySet<uint> nonReturningCallTargets,
-        IReadOnlySet<uint> lrContinuationCallTargets)
+        IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts)
     {
-        // A body that dispatches on ctx->lr can re-enter any of its own labels,
-        // including positions inside a block. The static CFG does not model
-        // those edges, so no liveness statement derived from it holds and the
-        // whole plan is abandoned for such functions.
-        if (HasOutOfBandLocalEntry(function, nonReturningCallTargets, lrContinuationCallTargets))
-        {
-            return FlagElisionPlan.Empty;
-        }
-
         var suppressed = new HashSet<(string Block, int Index)>();
         var fused = new Dictionary<string, FusedCompare>(StringComparer.OrdinalIgnoreCase);
 
         {
-            var context = new GuestFlagLivenessContext(guestAbiContracts, modOverridableCallTargets);
+            var context = new GuestFlagLivenessContext(guestAbiContracts);
             var liveness = GuestFlagLivenessAnalyzer.Analyze(function, cfg, context, GuestFlagState.All);
             var fusedCompareSites = new HashSet<(string Block, int Index)>();
 
@@ -184,9 +172,7 @@ public sealed partial class CxxLinearCodeGenerator
                     if (block.Instructions[index] is not IrAssign { Value.Kind: "const" } assign ||
                         !GetRegisterBaseName(assign.Destination).Equals("lr", StringComparison.OrdinalIgnoreCase) ||
                         block.Instructions[index + 1] is not IrCall call ||
-                        !CalleeIgnoresLinkRegister(
-                            call, guestAbiContracts, modOverridableCallTargets,
-                            nonReturningCallTargets, lrContinuationCallTargets))
+                        !CalleeIgnoresLinkRegister(call, guestAbiContracts))
                     {
                         continue;
                     }
@@ -204,56 +190,20 @@ public sealed partial class CxxLinearCodeGenerator
         return new FlagElisionPlan(suppressed, fused);
     }
 
-    /// <summary>
-    /// True when the body has a call whose callee may resume it via <c>EmitLocalLrContinuationDispatch</c>,
-    /// which can jump to any <c>loc_</c> label including ones inside a block, so the static CFG understates edges.
-    /// </summary>
-    private static bool HasOutOfBandLocalEntry(
-        IrFunction function,
-        IReadOnlySet<uint> nonReturningCallTargets,
-        IReadOnlySet<uint> lrContinuationCallTargets)
-    {
-        if (nonReturningCallTargets.Count == 0 && lrContinuationCallTargets.Count == 0)
-        {
-            return false;
-        }
-
-        foreach (var block in function.Blocks)
-        {
-            foreach (var instruction in block.Instructions)
-            {
-                if (instruction is IrCall call &&
-                    TryParseAddress(call.Target, out var target) &&
-                    (nonReturningCallTargets.Contains(target) || lrContinuationCallTargets.Contains(target)))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
     private static bool IsXerDestination(string? destination) =>
         !string.IsNullOrWhiteSpace(destination) &&
         GetRegisterBaseName(destination!).Equals("xer", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// A call whose return address never becomes observable state: translated functions return via the C++
-    /// stack, not by branching to ctx-&gt;lr, so the LR store is skipped unless the callee reads LR, the call site
-    /// dispatches on ctx-&gt;lr, or the callee escapes the contract model entirely.
+    /// stack, not by branching to ctx-&gt;lr, so the LR store is skipped unless the callee reads LR or escapes
+    /// the contract model entirely.
     /// </summary>
     private static bool CalleeIgnoresLinkRegister(
         IrCall call,
-        IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts,
-        IReadOnlySet<uint> modOverridableCallTargets,
-        IReadOnlySet<uint> nonReturningCallTargets,
-        IReadOnlySet<uint> lrContinuationCallTargets)
+        IReadOnlyDictionary<uint, GuestAbiContract> guestAbiContracts)
     {
         if (!TryParseAddress(call.Target, out var target) ||
-            modOverridableCallTargets.Contains(target) ||
-            nonReturningCallTargets.Contains(target) ||
-            lrContinuationCallTargets.Contains(target) ||
             !guestAbiContracts.TryGetValue(target, out var contract))
         {
             return false;

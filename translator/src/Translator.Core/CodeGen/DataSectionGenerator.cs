@@ -5,12 +5,11 @@ using System.Text;
 using Translator.Core.IO;
 using Translator.Core.Loading;
 using Translator.Core.Parsing.Dol;
-using Translator.Core.Parsing.Rel;
 
 namespace Translator.Core.CodeGen;
 
 /// <summary>
-/// Generates C++ code to initialize DOL and REL data sections directly in the binary.
+/// Generates C++ code to initialize the DOL sections directly in the binary.
 /// This allows running without loading a RAM dump at runtime.
 /// </summary>
 public static class DataSectionGenerator
@@ -20,10 +19,8 @@ public static class DataSectionGenerator
     /// </summary>
     public static void Generate(
         DolFile dol,
-        RelImage? rel,
         string outputPath,
         string projectName = "PowerPC DOL",
-        string relName = "rel_module",
         string? blobReferenceDirectory = null)
     {
         var sections = new List<DataSectionEntry>();
@@ -42,16 +39,6 @@ public static class DataSectionGenerator
                 Address: section.VirtualAddress,
                 Data: section.Data,
                 Source: "DOL"));
-        }
-        
-        // Add REL data if provided
-        if (rel != null && rel.Data.Length > 0)
-        {
-            sections.Add(new DataSectionEntry(
-                Name: SanitizeName(relName),
-                Address: rel.BaseAddress,
-                Data: rel.Data,
-                Source: "REL"));
         }
         
         var blobDirectory = Path.Combine(

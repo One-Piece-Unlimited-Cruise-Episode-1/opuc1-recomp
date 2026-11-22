@@ -14,24 +14,9 @@
 #include "memory.h"
 #include "hle_stubs.h"
 #include "ppc_runtime.h"
-#include "recomp_mod_loader.h"
 #include "runtime_log.h"
 #include "system_bridge.h"
 #include "guest_function_imports.h"
-
-extern "C" void OSInitAlarm_RecompModLateInit_801a961c(CpuContext* ctx) {
-    MKW_GUEST_FUNC(802746A8 /*mkw:801A961C*/)(ctx);
-}
-
-REGISTER_NATIVE_FUNCTION_AS(0x802746A8 /*mkw:801A961C*/, OSInitAlarm_RecompModLateInit_801a961c, "OSInitAlarm_RecompModLateInit_801a961c");
-
-extern "C" void StaticRProlog_RecompModInit_8055531c(CpuContext* ctx) {
-    RecompMod::RunMemoryInitializers();
-    OPUC_TODO(MKW_GUEST_FUNC, 8055531C)(ctx);
-    RecompMod::RunPostRelInitializers();
-}
-
-OPUC_UNBOUND(REGISTER_NATIVE_FUNCTION_AS, 0x8055531C, StaticRProlog_RecompModInit_8055531c, "StaticRProlog_RecompModInit_8055531c");
 
 namespace {
 std::string ReadGuestCStringLimited(uint32_t address, size_t limit = 4096) {
