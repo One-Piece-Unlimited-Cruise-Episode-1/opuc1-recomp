@@ -151,9 +151,10 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   Every removed hook was `OPUC_UNBOUND` or keyed to an `OPUC_TODO` address, so translation output did not change.
   Unbound generic SDK accessors (SC Bluetooth/WPAD items, SC product/serial, the nw4r::lyt quad path) stay until a
   Ghidra check rebinds or rules them out.
-- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 22 of 24 pass. `mkw_system_bridge_tests`
-  ("a constructor failure skipped later constructors") and `mkw_fiber_manager_tests` (uncaught `Memory::AccessViolation:
-  test memory bounds`) already fail at 25cd2c7; they are inherited and not looked into yet. CI does not run ctest.
+- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 23 of 24 pass. `mkw_system_bridge_tests` used
+  to expect Mario Kart constructor tables (DOL + StaticR.rel); it now checks that the runtime runs no constructor itself
+  (OPUC's `__init_cpp` does). `mkw_fiber_manager_tests` (uncaught `Memory::AccessViolation: test memory bounds`) already
+  failed at 25cd2c7 and is not looked into yet. CI does not run ctest.
 
 - Basis: WiiCompiled (translator and runtime, GPL-3.0, with its aurora fork, MIT). See `docs/reference-study.md`.
   That name appears only where the basis is credited: README.md (Credits), docs/reference-study.md, the UPSTREAM.txt

@@ -53,12 +53,8 @@ extern const uint32_t kGuestMapSymbolCount = 0;
 extern const uint32_t kGuestMapSymbolAddresses[] = {0};
 extern const char* const kGuestMapSymbolNames[] = {""};
 void InitializeDataSections() {
-    for (const uint32_t start : {MKW_GADDR(80244DE0), MKW_GADDR(8088f400)}) {
-        for (uint32_t i = 0; i < 6; ++i) g_words[start + 4 * i] = kCtorBase + 4 * i;
-        g_words[start + 24] = 0;
-        g_words[start + 28] = 0xffffffff;
-        g_words[start + 32] = 0xdeadbeef;
-    }
+    // OPUC .ctors (0x804FFC00, 0x180 bytes): if the runtime ever walked them again, these entries would be called.
+    for (uint32_t i = 0; i < 6; ++i) g_words[0x804FFC00u + 4 * i] = kCtorBase + 4 * i;
 }
 }
 void InitializePersistentCpuContext() { g_cpu = {}; }
@@ -101,16 +97,14 @@ int main() {
         CpuContext caller{};
         g_currentCpuContext = &caller;
         SystemBridge::Initialize();
+        // OPUC: __start -> __init_user -> __init_cpp constructs the DOL statics itself, so the runtime must
+        // not run any constructor a second time.
+        Require(g_calls.empty(), "the runtime ran DOL static constructors that the game runs itself");
         Require(!g_invalidContext, "constructor context or recovery target was not prepared");
-        Require(g_calls.size() == 12, "a constructor failure skipped later constructors");
-        for (size_t i = 0; i < g_calls.size(); ++i)
-            Require(g_calls[i] == kCtorBase + 4 * (i % 6), "constructor ordering changed");
-        Require(g_unwound == 10 && g_caught == 2, "C++ exceptions did not unwind or remain locally catchable");
         Require(!g_suppressSehReporting && g_sehJumpTarget == nullptr, "constructor recovery state leaked");
         Require(g_currentCpuContext == &caller, "constructor scope did not restore the caller context");
-        Require(log.str().find("Executed 2 main DOL static constructors.") != std::string::npos &&
-                log.str().find("Executed 2 static constructors.") != std::string::npos,
-                "failed constructors were counted as successful");
+        Require(log.str().find("Executed 0 main DOL static constructors.") != std::string::npos,
+                "unexpected constructor count");
         g_currentCpuContext = nullptr;
     } catch (const std::exception& error) {
         std::cerr.rdbuf(saved);
