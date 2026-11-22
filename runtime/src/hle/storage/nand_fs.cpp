@@ -210,7 +210,7 @@ static const RiivolutionSaveRedirect& GetRiivolutionSaveRedirect() {
     // The active pack's <savegame> patch, resolved against the virtual SD root
     // exactly like Dolphin resolves it for Riivolution launches. This keeps
     // the recomp's save in the same folder a Dolphin/WheelWizard launch of the
-    // pack uses (e.g. .../Riivolution/WheelWizard/riivolution/save/RetroWFC/RMCP).
+    // pack uses (e.g. .../riivolution/save/<pack>/<game id>).
     std::call_once(g_riivolutionSaveRedirectOnce, []() {
         const auto& redirect = RuntimeRiivolution::GetSaveRedirect();
         if (!redirect) {

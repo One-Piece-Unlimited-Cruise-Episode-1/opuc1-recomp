@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using Translator.Core.Mods.Mkwii;
 using Translator.Core.Parsing.Kamek;
 using Xunit;
 
@@ -80,10 +79,10 @@ public class KamekPulFileTests
     }
 
     [Theory]
-    [InlineData("P", 0x800ED6E8u)]
-    [InlineData("E", 0x800ED648u)]
-    [InlineData("J", 0x800ED608u)]
-    public void ParsesBundledRetroRewindCodePulWhenPresent(string region, uint bootstrapHook)
+    [InlineData("P")]
+    [InlineData("E")]
+    [InlineData("J")]
+    public void ParsesBundledRetroRewindCodePulWhenPresent(string region)
     {
         var repoRoot = ProjectPathsForTests.FindRepositoryRoot();
         var codePul = Path.Combine(repoRoot, "PulsarPacks", "completed", "RetroRewind", "RetroRewind6", "Binaries", "Code.pul");
@@ -106,9 +105,6 @@ public class KamekPulFileTests
         Assert.NotEmpty(chunk.Commands);
         Assert.Equal(chunk.Commands.Count, chunk.RelativeCommandCount + chunk.AbsoluteCommandCount);
         Assert.Equal(chunk.Commands.Count, chunk.CommandCounts.Values.Sum());
-        var lowered = RetroWfcBootstrapSuppressor.Suppress(chunk, bootstrapHook);
-        Assert.Equal(chunk.Commands.Count - 1, lowered.Commands.Count);
-        Assert.DoesNotContain(lowered.Commands, command => command.AddressIsAbsolute && command.Address == bootstrapHook);
     }
 
     private static byte[] BuildChunk(uint bssSize, byte[] code, byte[][] commands,

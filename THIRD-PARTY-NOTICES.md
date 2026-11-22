@@ -32,34 +32,17 @@ Copyright (c) 2003+ Dolphin Emulator Project.
 Source: <https://github.com/dolphin-emu/dolphin> - license at
 <https://github.com/dolphin-emu/dolphin/blob/master/COPYING>
 
-Two data sets from Dolphin's `Data/Sys` tree are redistributed here under GPL-2.0-or-later:
+One data file from Dolphin's `Data/Sys` tree is redistributed here under GPL-2.0-or-later:
 
-| File(s) | Upstream path | Notes |
+| File | Upstream path | Notes |
 | --- | --- | --- |
 | `runtime/assets/dsp/dsp_coef.bin` | `Data/Sys/GC/dsp_coef.bin` | Free DSP polyphase-resampling coefficient ROM written by the Dolphin team. 4096 bytes, SHA-256 `D7741279C2E8EC5C5FB318F8FBDD6DE6BF583520D288E836A5383233A4238179`. The runtime verifies this hash at build time. |
-| `runtime/assets/wii/shared2/wc24/**` | `Data/Sys/Wii/shared2/wc24` | Dolphin's unmodified default WiiConnect24 bootstrap tree, used to seed a newly created per-user NAND on first run. It is byte-identical to the upstream directory. `nwc24dl.bin` contains Dolphin's default task list, which references Nintendo endpoints shut down in 2014; `nwc24msg.cfg` contains Dolphin's placeholder account fields, not a real user's account data. |
 
-Neither contains Nintendo executable code or game assets; both are redistributed under
-GPL-2.0-or-later from Dolphin's `Data/Sys` tree.
-
-SHA-256 hashes for the WiiConnect24 bootstrap tree:
-
-| File | SHA-256 |
-| --- | --- |
-| `runtime/assets/wii/shared2/wc24/misc.bin` | `13DD5B6B2682DEFD3B23AFD8E2983D00EDC25BD4DC28A8389380DEE0EC45A4A5` |
-| `runtime/assets/wii/shared2/wc24/nwc24dl.bin` | `057B6F840C19B41CE080318BC7E717E2B910965CE72AB781A7E319017636C38E` |
-| `runtime/assets/wii/shared2/wc24/nwc24fl.bin` | `ED94AF416C47ED3BC2C944EBCD1D734B8935D9697FEB0F7039D8FEA3EC514C18` |
-| `runtime/assets/wii/shared2/wc24/nwc24fls.bin` | `C3A4A5649D6ED2322A0DE98D2258B96A6A1D3C0179854FD21E9835D529736822` |
-| `runtime/assets/wii/shared2/wc24/nwc24msg.cbk` | `7AFEBF33EEB0035397CC74E15E892E700CD2903641D26562F5D46CFBB6171109` |
-| `runtime/assets/wii/shared2/wc24/nwc24msg.cfg` | `7AFEBF33EEB0035397CC74E15E892E700CD2903641D26562F5D46CFBB6171109` |
-| `runtime/assets/wii/shared2/wc24/mbox/Readme.txt` | `E5A888912968050C6C1D46D1C364C324684E1D15AAA62CFE36CF7FCE2C687B21` |
-| `runtime/assets/wii/shared2/wc24/mbox/wc24recv.ctl` | `EFA39268E7071941E4FE429D49C86D73BEE952DF95D91D7909C478DD1BC9050A` |
-| `runtime/assets/wii/shared2/wc24/mbox/wc24recv.mbx` | `DD2AD8C9FB38884523459963BFAEC5D5AEAA5FD20EFCDC209764D461E690E435` |
-| `runtime/assets/wii/shared2/wc24/mbox/wc24send.ctl` | `430C3795F1A0AEB198BF626A4A2FF6D123321D453807DD7B904DC3B74DB35D13` |
-| `runtime/assets/wii/shared2/wc24/mbox/wc24send.mbx` | `C248DC031CE09F7BE1E55956B6F173E79D6A47D913C22A16593C4687325692B7` |
+It contains no Nintendo executable code or game assets.
 
 Dolphin was also used extensively as a behavioural reference during development of this project's
-hardware and IOS high-level implementations.
+hardware and IOS high-level implementations; the offline WiiConnect24 KD time device
+(`runtime/src/hle/wc24/kd_offline.cpp`) follows Dolphin's `NetKDTimeDevice`.
 
 ### Dolphin Emulator Riivolution code - GPL-2.0-or-later
 
@@ -114,14 +97,13 @@ Source: <https://github.com/higan-emu/libco>. Full license text:
 
 ## Fetched at build time and redistributed in release builds
 
-These are pinned in `third_party/aurora/extern/CMakeLists.txt`, `third_party/aurora/CMakeLists.txt`,
-`third_party/aurora/cmake/AuroraDawnProvider.cmake`, and (for Mbed TLS) `runtime/CMakeLists.txt`. They are
-not stored in this repository; the build downloads them - each fetch is pinned to an exact version
-with a checked SHA-256 - and links or redistributes the resulting binaries.
+These are pinned in `third_party/aurora/extern/CMakeLists.txt`, `third_party/aurora/CMakeLists.txt` and
+`third_party/aurora/cmake/AuroraDawnProvider.cmake`. They are not stored in this repository; the build
+downloads them - each fetch is pinned to an exact version with a checked SHA-256 - and links or
+redistributes the resulting binaries.
 
 | Component | Version | License | Upstream |
 | --- | --- | --- | --- |
-| Mbed TLS | 3.6.7 | Apache-2.0 / GPL-2.0-or-later | <https://github.com/Mbed-TLS/mbedtls> |
 | Dawn (WebGPU) | `v20260603.191052` prebuilt | BSD-3-Clause | <https://dawn.googlesource.com/dawn> |
 | Tint (part of Dawn) | with Dawn | BSD-3-Clause | <https://dawn.googlesource.com/dawn> |
 | DirectXShaderCompiler (`dxcompiler.dll`) | with Dawn | NCSA / University of Illinois Open Source | <https://github.com/microsoft/DirectXShaderCompiler> |

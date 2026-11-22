@@ -69,7 +69,6 @@ if (unrecognizedOption is not null)
     WriteUsage(Console.Error, new[] { command });
     return 2;
 }
-var preferCachedInputs = enabledFlags.Contains("--prefer-cached-inputs");
 var dolFile = new Lazy<DolFile>(LoadDol);
 var relFile = new Lazy<RelFile?>(LoadRel);
 var image = new Lazy<ProgramImage>(LoadImage);
@@ -148,7 +147,6 @@ TranslationOptions WithProjectFrontEndPolicy(
         // the original bytes.
         LeafInliningBlockedTargets = leafInliningBlockedTargets.Value
     };
-string? translateModInputCacheDirectory = null;
 // translate-mod reads the same (large) base metadata from several places.
 var baseMetadataCache = new Dictionary<string, BaseTranslationOutputMetadata>(StringComparer.OrdinalIgnoreCase);
 BaseTranslationOutputMetadata ReadBaseMetadataCached(string path)
@@ -177,7 +175,6 @@ return command switch
     "emit-native-index" => RunEmitNativeIndex(),
     "emit-base-manifest" => RunEmitBaseManifest(),
     "check-base-mod-awareness" => RunCheckBaseModAwareness(),
-    "validate-retro-wfc-payload" => RunValidateRetroWfcPayload(),
     _ => ShowHelp(command)
 };
 
@@ -334,75 +331,6 @@ int RunEmitNativeIndex()
     return 0;
 }
 
-byte[] LoadBinaryInput(string spec, string outDir, string downloadFileName)
-{
-    if (Uri.TryCreate(spec, UriKind.Absolute, out var uri) &&
-        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-    {
-        Directory.CreateDirectory(outDir);
-        var downloadPath = Path.Combine(outDir, downloadFileName);
-        var cachedPath = ResolveCachedTranslateModInput(downloadPath, downloadFileName, spec);
-        if (preferCachedInputs && cachedPath is not null)
-        {
-            Console.Error.WriteLine($"[translator] using cached input {cachedPath}");
-            var cachedBytes = File.ReadAllBytes(cachedPath);
-            if (!string.Equals(cachedPath, downloadPath, StringComparison.OrdinalIgnoreCase))
-            {
-                File.WriteAllBytes(downloadPath, cachedBytes);
-                File.WriteAllText(downloadPath + ".source", spec);
-            }
-            return cachedBytes;
-        }
-        Console.Error.WriteLine($"[translator] fetching {uri}");
-        using var client = new System.Net.Http.HttpClient();
-        var bytes = client.GetByteArrayAsync(uri).GetAwaiter().GetResult();
-        File.WriteAllBytes(downloadPath, bytes);
-        File.WriteAllText(downloadPath + ".source", spec);
-        return bytes;
-    }
-
-    return File.ReadAllBytes(Path.GetFullPath(Path.Combine(root, spec)));
-}
-
-string? ResolveCachedTranslateModInput(string outputPath, string fileName, string spec)
-{
-    if (CachedTranslateModInputMatchesSpec(outputPath, spec))
-    {
-        return outputPath;
-    }
-
-    if (!string.IsNullOrWhiteSpace(translateModInputCacheDirectory))
-    {
-        var priorPublishedPath = Path.Combine(translateModInputCacheDirectory, fileName);
-        if (CachedTranslateModInputMatchesSpec(priorPublishedPath, spec))
-        {
-            return priorPublishedPath;
-        }
-    }
-
-    return null;
-}
-
-bool CachedTranslateModInputMatchesSpec(string path, string spec)
-{
-    // A cached download is only valid for the spec that produced it; the
-    // sidecar records that spec so a changed profile URL forces a re-fetch
-    // instead of silently reusing bytes from the previous endpoint.
-    var sourcePath = path + ".source";
-    return File.Exists(path) &&
-        File.Exists(sourcePath) &&
-        string.Equals(File.ReadAllText(sourcePath).Trim(), spec.Trim(), StringComparison.Ordinal);
-}
-
-static uint AlignUp(uint value, uint alignment)
-{
-    if (alignment == 0 || (alignment & (alignment - 1)) != 0)
-    {
-        throw new ArgumentException("Alignment must be a non-zero power of two.", nameof(alignment));
-    }
-    return checked((value + alignment - 1u) & ~(alignment - 1u));
-}
-
 int RunInfo()
 {
     var asm = Assembly.GetExecutingAssembly();
@@ -418,32 +346,6 @@ int RunInfo()
             : $"REL     : {project.Inputs.Rel.Path} @ 0x{project.Inputs.Rel.LoadAddress:X8}");
     }
     return 0;
-}
-
-int RunValidateRetroWfcPayload()
-{
-    var directory = optionValues.GetValueOrDefault("--directory");
-    if (string.IsNullOrWhiteSpace(directory))
-    {
-        Console.Error.WriteLine("--directory is required.");
-        return 1;
-    }
-
-    try
-    {
-        if (directory.Length >= 0) throw new InvalidDataException("Retro WFC payloads are MKWii-only and were removed from the OPUC fork.");
-        return 0;
-    }
-    catch (InvalidDataException ex)
-    {
-        Console.Error.WriteLine($"[translator] Retro WFC payload validation failed: {ex.Message}");
-        return 2;
-    }
-    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-    {
-        Console.Error.WriteLine($"[translator] Could not read Retro WFC payload: {ex.Message}");
-        return 1;
-    }
 }
 
 int RunTranslateRecursive(string? firstCommandArgument)
@@ -1640,9 +1542,7 @@ int RunTranslateMod()
     }
 
     var publishedOutput = Path.GetFullPath(outDir);
-    var previousInputCache = translateModInputCacheDirectory;
     var previousPublishedOutput = translateModPublishedOutputDirectory;
-    translateModInputCacheDirectory = publishedOutput;
     translateModPublishedOutputDirectory = publishedOutput;
     try
     {
@@ -1668,7 +1568,6 @@ int RunTranslateMod()
     }
     finally
     {
-        translateModInputCacheDirectory = previousInputCache;
         translateModPublishedOutputDirectory = previousPublishedOutput;
     }
 }
@@ -1775,18 +1674,6 @@ int RunTranslateModCore(string? outputDirectoryOverride)
             $"[translator] Warning: no base translation output metadata at {baseTranslationOutputMetadataPath}; " +
             "cannot verify the base translation is aware of this mod's patch set.");
     }
-    var skipRetroWfc = enabledFlags.Contains("--skip-retro-wfc");
-    var explicitRetroWfcPayloadSpec = optionValues.GetValueOrDefault("--retro-wfc-payload");
-    var retroWfcPayloadSpec = skipRetroWfc
-        ? null
-        : explicitRetroWfcPayloadSpec ??
-          (profile?.EnableRetroWfc == true ? profile.RetroWfcPayload : null);
-    var requestedRetroWfc = !string.IsNullOrWhiteSpace(retroWfcPayloadSpec);
-    if (requestedRetroWfc && profile?.EnableRetroWfc != true)
-    {
-        Console.Error.WriteLine("[translator] Retro WFC lowering is project-specific and requires a profile with enable_retro_wfc: true.");
-        return 1;
-    }
     var modName = optionValues.GetValueOrDefault("--mod-name")
         ?? (!string.IsNullOrWhiteSpace(modRoot) ? Path.GetFileName(Path.GetFullPath(modRoot)) : "Pulsar Mod");
     var region = optionValues.GetValueOrDefault("--region") ?? profile?.Region ?? "P";
@@ -1821,51 +1708,8 @@ int RunTranslateModCore(string? outputDirectoryOverride)
             Console.WriteLine("[translator] Applied Retro Rewind's NTSC-U ESRB skip statically at 0x80604094.");
         selected = esrb;
     }
-    if (requestedRetroWfc && profile?.RetroWfcLegacyBootstrapHook is { } legacyBootstrapHook)
-    {
-        selected = RetroWfcBootstrapSuppressor.Suppress(selected, legacyBootstrapHook);
-        Console.WriteLine(
-            $"[translator] Suppressed legacy Retro WFC payload bootstrap hook at 0x{legacyBootstrapHook:X8}; " +
-            "the shared payload is initialized statically.");
-    }
     var baseManifest = JsonSerializer.Deserialize<BaseManifest>(File.ReadAllText(baseManifestPath))
         ?? throw new InvalidDataException($"Failed to parse base manifest: {baseManifestPath}");
-    RetroWfcContractLoweringPlan? retroWfcLoweringPlan = null;
-    RetroWfcPayloadLoadResult? retroWfcPayload = null;
-
-    if (!string.IsNullOrWhiteSpace(retroWfcPayloadSpec))
-    {
-        byte[] payloadImage;
-        try
-        {
-            payloadImage = LoadBinaryInput(retroWfcPayloadSpec, outDir, "retro_wfc_payload.bin");
-            File.WriteAllBytes(Path.Combine(outDir, "retro_wfc_payload.bin"), payloadImage);
-        }
-        catch (Exception ex) when (ex is IOException or System.Net.Http.HttpRequestException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Failed to read Retro WFC payload '{retroWfcPayloadSpec}': {ex.Message}");
-            return 1;
-        }
-
-        var helperModuleOffset = AlignUp(checked(selected.CodeSize + selected.BssSize), 0x20u);
-        try
-        {
-            retroWfcPayload = RetroWfcPayload.Parse(
-                payloadImage,
-                baseManifest,
-                moduleGuestBase,
-                helperModuleOffset,
-                retroWfcPayloadSpec);
-        }
-        catch (InvalidDataException ex)
-        {
-            Console.Error.WriteLine($"Failed to parse Retro WFC payload '{retroWfcPayloadSpec}': {ex.Message}");
-            return 2;
-        }
-
-        retroWfcLoweringPlan = retroWfcPayload.LoweringPlan;
-        Console.WriteLine($"[translator] Retro WFC shared payload validated: {retroWfcLoweringPlan.StaticBytePatches.Count:N0} static byte patch(es), {retroWfcLoweringPlan.ExecutableHooks.Count:N0} executable hook(s), {retroWfcLoweringPlan.StaticPointers.Count:N0} static pointer(s).");
-    }
 
     var patchPlan = KamekPatchPlanner.Build(selected, baseManifest, moduleGuestBase);
     var continuationPlan = ContinuationPlanner.Build(selected, baseManifest, moduleGuestBase);
@@ -1887,46 +1731,12 @@ int RunTranslateModCore(string? outputDirectoryOverride)
 
     var baseManifestDirectory = Path.GetDirectoryName(Path.GetFullPath(baseManifestPath))!;
 
-    var retroWfcOverlayStaticBytePatches = retroWfcLoweringPlan?.StaticBytePatches
-        .Where(p => string.Equals(p.LoweringKind, "overlayBytePatch", StringComparison.Ordinal))
-        .ToList();
-    var retroWfcResolvedExecutableHooks = retroWfcLoweringPlan?.ExecutableHooks
-        .Where(h => h.TargetAddress.HasValue)
-        .ToList();
-    var additionalModuleImage = retroWfcPayload?.RelocatedImage;
-    uint? additionalModuleImageOffset = retroWfcPayload?.Summary.HelperModuleOffset;
     var overlayBuild = OverlayFunctionBuilder.BuildAndWrite(
         selected,
         baseManifest,
         patchPlan,
         baseManifestDirectory,
-        outDir,
-        additionalModuleImage: additionalModuleImage,
-        additionalModuleImageOffset: additionalModuleImageOffset,
-        retroWfcStaticBytePatches: retroWfcOverlayStaticBytePatches,
-        retroWfcExecutableHooks: retroWfcResolvedExecutableHooks);
-
-    if (retroWfcLoweringPlan is not null)
-    {
-        var overlayStaticBytePatchCount = retroWfcOverlayStaticBytePatches?.Count ?? 0;
-        var staticBytePatchesNeedingAnotherLowering = retroWfcLoweringPlan.StaticBytePatches.Count - overlayStaticBytePatchCount;
-        var failedRetroWfcOverlayPatches = overlayBuild.Diagnostics.Count(d => d.Target.StartsWith("RetroWFC#", StringComparison.Ordinal));
-        var unresolvedExecutableHooks = retroWfcLoweringPlan.ExecutableHooks.Count(h => !h.TargetAddress.HasValue);
-        var unresolvedStaticPointers = retroWfcLoweringPlan.StaticPointers.Count(p => !p.TargetAddress.HasValue);
-        var resolvedExecutablePointerWrites = retroWfcLoweringPlan.StaticPointers.Count(p => p.SectionExecutable && p.TargetAddress.HasValue);
-        if (staticBytePatchesNeedingAnotherLowering != 0 ||
-            failedRetroWfcOverlayPatches != 0 ||
-            unresolvedExecutableHooks != 0 ||
-            unresolvedStaticPointers != 0 ||
-            resolvedExecutablePointerWrites != 0)
-        {
-            Console.Error.WriteLine("[translator] translate-mod stopped: Retro WFC supported static overlay patches were emitted, but unresolved payload lowering remains.");
-            Console.Error.WriteLine($"[translator] Static byte overlays emitted: {overlayStaticBytePatchCount:N0}/{retroWfcLoweringPlan.StaticBytePatches.Count:N0}; semantic hooks resolved: {(retroWfcResolvedExecutableHooks?.Count ?? 0):N0}/{retroWfcLoweringPlan.ExecutableHooks.Count:N0}; failed overlay patches: {failedRetroWfcOverlayPatches:N0}; unresolved hooks: {unresolvedExecutableHooks:N0}; unresolved pointer writes: {unresolvedStaticPointers:N0}; executable pointer writes pending overlay support: {resolvedExecutablePointerWrites:N0}.");
-            Console.Error.WriteLine("[translator] This is fail-closed; no final translated mod build is emitted that ignores unresolved payload lowering.");
-            Console.Error.WriteLine(retroWfcLoweringPlan.BuildTextReport());
-            return 2;
-        }
-    }
+        outDir);
 
     var relocatedModuleImagePath = Path.Combine(outDir, "overlay_images", overlayBuild.ModuleImageFile);
     var relocatedModuleImage = File.ReadAllBytes(relocatedModuleImagePath);
@@ -1936,41 +1746,12 @@ int RunTranslateModCore(string? outputDirectoryOverride)
         baseManifest,
         moduleGuestBase,
         relocatedModuleImage);
-    if (retroWfcResolvedExecutableHooks is { Count: > 0 })
-    {
-        continuationPlan = ContinuationPlanner.AddRetroWfcExecutableHookContinuations(
-            continuationPlan,
-            baseManifest,
-            retroWfcResolvedExecutableHooks);
-    }
 
     var discoveredKamekFunctionStarts = ModFunctionDiscovery.DiscoverKamekFunctions(
         selected,
         moduleGuestBase,
         relocatedModuleImage);
-    var retroWfcSemanticFunctionStarts = retroWfcLoweringPlan is null
-        ? Enumerable.Empty<ModFunctionStart>()
-        : retroWfcLoweringPlan.ExecutableHooks
-            .Where(h => h.TargetAddress.HasValue && string.Equals(h.TargetKind, "moduleFunction", StringComparison.Ordinal))
-            .Select(h => new ModFunctionStart(h.TargetAddress!.Value, $"Retro WFC semantic action {h.TargetActionId ?? string.Join(",", h.SemanticActionIds)}"))
-            .Concat(retroWfcLoweringPlan.StaticPointers
-                .Where(p => p.TargetAddress.HasValue && string.Equals(p.TargetKind, "moduleFunction", StringComparison.Ordinal))
-                .Select(p => new ModFunctionStart(p.TargetAddress!.Value, $"Retro WFC semantic action {p.TargetActionId ?? string.Join(",", p.SemanticActionIds)}")));
-    var retroWfcInitializerTarget = retroWfcPayload?.Summary.InitializationTargetAddress;
-    var retroWfcInitializerFunctionStarts = retroWfcInitializerTarget is { } initializerTarget
-        ? new[] { new ModFunctionStart(initializerTarget, "Retro WFC payload initialization") }
-        : Enumerable.Empty<ModFunctionStart>();
-    var retroWfcInitializationCallbacks = retroWfcPayload?.Summary.InitializationCallbacks;
-    var retroWfcInitializationCallbackStarts = (retroWfcInitializationCallbacks ?? Array.Empty<RetroWfcHelperInitCallback>())
-        .Select(c => new ModFunctionStart(
-            c.TargetAddress,
-            string.IsNullOrWhiteSpace(c.Symbol)
-                ? $"Retro WFC payload initialization callback {c.Kind}"
-                : $"Retro WFC payload initialization callback {c.Kind} {c.Symbol}"));
     var kamekFunctionStarts = discoveredKamekFunctionStarts
-        .Concat(retroWfcSemanticFunctionStarts)
-        .Concat(retroWfcInitializerFunctionStarts)
-        .Concat(retroWfcInitializationCallbackStarts)
         .GroupBy(s => s.Address)
         .Select(g => new ModFunctionStart(g.Key, string.Join("; ", g.Select(s => s.Reason).Distinct(StringComparer.Ordinal))))
         .OrderBy(s => s.Address)
@@ -1993,7 +1774,6 @@ int RunTranslateModCore(string? outputDirectoryOverride)
             baseManifest,
             overlayBuild,
             continuationPlan,
-            retroWfcResolvedExecutableHooks,
             patchPlan,
             kamekFunctionStarts,
             moduleLinkBase,
@@ -2017,19 +1797,11 @@ int RunTranslateModCore(string? outputDirectoryOverride)
         dvdOverlayRoots,
         relocatedModuleImage,
         sourceKamekCodeSha1,
-        retroWfcLoweringPlan?.StaticPointers,
         selected.CodeSize,
         selected.BssSize,
         checked(moduleGuestBase + selected.CtorStart),
         checked(moduleGuestBase + selected.CtorEnd),
         emitFullInitializerSet,
-        emitFullInitializerSet ? retroWfcInitializerTarget : null,
-        emitFullInitializerSet
-            ? retroWfcPayload?.Summary.HelperModuleBase
-            : null,
-        emitFullInitializerSet
-            ? retroWfcPayload?.Summary.InitializationSuccessReturnValue
-            : null,
         Path.Combine(
             translateModPublishedOutputDirectory ?? outDir,
             "cpp",
@@ -2342,7 +2114,6 @@ int EmitModCpp(
     BaseManifest baseManifest,
     OverlayBuildResult overlayBuild,
     ContinuationPlan continuationPlan,
-    IReadOnlyCollection<RetroWfcExecutableHookPlan>? retroWfcExecutableHooks,
     KamekPatchPlan patchPlan,
     IReadOnlyList<ModFunctionStart> kamekFunctionStarts,
     uint moduleLinkBase,
@@ -2379,13 +2150,6 @@ int EmitModCpp(
     var queuedContinuationAddresses = continuationPlan.Entries.Select(e => e.Address).ToHashSet();
     var discoveredContinuationQueue = new Queue<ContinuationEntry>();
     var hookLrBases = new List<(uint TargetAddress, uint ContinuationAddress)>();
-    if (retroWfcExecutableHooks is not null)
-    {
-        hookLrBases.AddRange(
-            retroWfcExecutableHooks
-                .Where(h => h.TargetAddress.HasValue && RetroWfcHookSetsLinkRegister(h))
-                .Select(h => (h.TargetAddress!.Value, h.ContinuationAddress)));
-    }
     var hookLrAnalysis = new Dictionary<uint, LrContinuationAnalysis>();
     var hookDiscoveryCache = new Dictionary<uint, IReadOnlyList<PpcInstruction>>();
     IReadOnlyList<PpcInstruction> DiscoverHookBody(uint target)
@@ -2426,12 +2190,6 @@ int EmitModCpp(
             g => g.Key,
             g => g.Select(h => h.ContinuationAddress).Distinct().ToArray());
     var lrContinuationCallTargets = linkedHookLrBasesByTarget.Keys.ToHashSet();
-    var linkedCallFallthroughLrOverrides = retroWfcExecutableHooks is null
-        ? new Dictionary<uint, uint>()
-        : retroWfcExecutableHooks
-            .Where(h => h.TargetAddress.HasValue && RetroWfcHookSetsLinkRegister(h))
-            .GroupBy(h => checked(h.Address + 4u))
-            .ToDictionary(g => g.Key, g => g.First().ContinuationAddress);
 
     ModTranslationAttempt[] TranslateWave(IReadOnlyList<ModTranslationWork> wave)
     {
@@ -2568,7 +2326,6 @@ int EmitModCpp(
                 ModRegistrationModuleId: 1,
                 NonReturningCallTargets: nonReturningCallTargets,
                 LrContinuationCallTargets: lrContinuationCallTargets,
-                LinkedCallFallthroughLrOverrides: linkedCallFallthroughLrOverrides,
                 KnownFunctionEntryPoints: knownFunctionEntryPoints),
             RequireProject().Translation,
             continuation.Address);
@@ -2598,7 +2355,6 @@ int EmitModCpp(
                 ModRegistrationModuleId: 1,
                 NonReturningCallTargets: nonReturningCallTargets,
                 LrContinuationCallTargets: lrContinuationCallTargets,
-                LinkedCallFallthroughLrOverrides: linkedCallFallthroughLrOverrides,
                 KnownFunctionEntryPoints: knownFunctionEntryPoints),
             RequireProject().Translation,
             overlay.Start);
@@ -2656,7 +2412,6 @@ int EmitModCpp(
                     ModRegistrationModuleId: 1,
                     NonReturningCallTargets: nonReturningCallTargets,
                     LrContinuationCallTargets: lrContinuationCallTargets,
-                    LinkedCallFallthroughLrOverrides: linkedCallFallthroughLrOverrides,
                     KnownFunctionEntryPoints: knownFunctionEntryPoints,
                     ModuleLinkBase: moduleLinkBase,
                     ModuleGuestBase: overlayBuild.ModuleGuestBase,
@@ -2877,10 +2632,6 @@ IEnumerable<uint> DirectModuleTargets(FunctionTranslationResult result, uint mod
         }
     }
 }
-
-static bool RetroWfcHookSetsLinkRegister(RetroWfcExecutableHookPlan hook) =>
-    hook.TypeName is "call" or "branchCtrLink" ||
-    hook.Intent.Contains("Call", StringComparison.Ordinal);
 
 int RunEmitBaseManifest()
 {
@@ -3666,7 +3417,7 @@ static void WriteUsage(TextWriter writer, IReadOnlyList<string> commands)
     {
         writer.WriteLine(CommandUsage(name));
     }
-    writer.WriteLine("Every command also accepts [--project path] [--profile name] [--prefer-cached-inputs] [--help].");
+    writer.WriteLine("Every command also accepts [--project path] [--profile name] [--help].");
 }
 
 static string[] KnownCommands() => new[]
@@ -3678,8 +3429,7 @@ static string[] KnownCommands() => new[]
     "emit-base-manifest",
     "emit-build-shards",
     "emit-native-index",
-    "check-base-mod-awareness",
-    "validate-retro-wfc-payload"
+    "check-base-mod-awareness"
 };
 
 /// <summary>
@@ -3714,19 +3464,12 @@ static (string? Positional, CommandOption[] Options)? CommandSpec(string command
         new("--module-guest-base", "0x81700000"),
         new("--module-link-base", "0x803992E0"),
         new("--threads", "N"),
-        new("--retro-wfc-payload", "path-or-url"),
-        new("--skip-retro-wfc"),
         new("--emit-cpp")
     }),
     "check-base-mod-awareness" => (null, new CommandOption[]
     {
         new("--translation-output-metadata", "path"),
         new("--code-pul", "path")
-    }),
-    "validate-retro-wfc-payload" => (null, new CommandOption[]
-    {
-        new("--directory", "directory", Required: true),
-        new("--game-id", "id", Required: true)
     }),
     "emit-base-manifest" => (null, new CommandOption[]
     {
@@ -3778,7 +3521,7 @@ static (Dictionary<string, string> Values, HashSet<string> Flags, string? FirstC
 {
     var spec = CommandSpec(command);
     var valueNames = new HashSet<string>(StringComparer.Ordinal) { "--project", "--profile" };
-    var flagNames = new HashSet<string>(StringComparer.Ordinal) { "--prefer-cached-inputs" };
+    var flagNames = new HashSet<string>(StringComparer.Ordinal);
     foreach (var option in spec?.Options ?? Array.Empty<CommandOption>())
     {
         (option.Value is null ? flagNames : valueNames).Add(option.Name);

@@ -3,7 +3,6 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using Translator.Core.Disassembly;
 using Translator.Core.Parsing.Kamek;
-using Translator.Core.Mods.Mkwii;
 
 namespace Translator.Core.Mods;
 
@@ -104,46 +103,6 @@ public static class ContinuationPlanner
                 tailJump.SourceAddress,
                 KamekCommandId.Branch,
                 "Kamek module tail jump lands inside a base function"));
-        }
-
-        return new ContinuationPlan
-        {
-            Entries = entries.Values.OrderBy(e => e.Address).ToList()
-        };
-    }
-
-    public static ContinuationPlan AddRetroWfcExecutableHookContinuations(
-        ContinuationPlan plan,
-        BaseManifest baseManifest,
-        IEnumerable<RetroWfcExecutableHookPlan> hooks)
-    {
-        var functionIndex = new BaseFunctionIndex(baseManifest.Functions);
-        var entries = plan.Entries.ToDictionary(e => e.Address);
-
-        foreach (var hook in hooks)
-        {
-            var target = hook.ContinuationAddress;
-            var section = FindSection(baseManifest, target);
-            if (section is null || !section.Executable)
-            {
-                continue;
-            }
-
-            var function = functionIndex.FindContaining(target);
-            if (function is null || function.Start == target)
-            {
-                continue;
-            }
-
-            var action = hook.TargetActionId ?? string.Join(",", hook.SemanticActionIds);
-            entries.TryAdd(target, new ContinuationEntry(
-                target,
-                function.Start,
-                function.End,
-                section.Name,
-                hook.Address,
-                KamekCommandId.Branch,
-                $"Retro WFC executable hook continuation {action}"));
         }
 
         return new ContinuationPlan

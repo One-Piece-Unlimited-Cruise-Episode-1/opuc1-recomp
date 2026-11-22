@@ -11,7 +11,7 @@
 #include "nand_path.h"
 #include "nand_save_probe.h"
 #include "hle/bluetooth_hle.h"
-#include "hle/net/network.h"
+#include "hle/wc24/kd_offline.h"
 #include "recomp_mod_loader.h"
 #include "runtime_config.h"
 #include "runtime_product.h"

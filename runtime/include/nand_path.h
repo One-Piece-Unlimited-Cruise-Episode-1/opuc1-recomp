@@ -58,92 +58,12 @@ inline std::filesystem::path ManagedNandRootPath() {
     return RuntimeConfigFile::ApplicationDataDirectory() / "NAND";
 }
 
-inline std::optional<std::filesystem::path> BootstrapPayloadPath() {
-    if (auto executableDirectory = RuntimeConfigFile::ExecutableDirectory()) {
-        const auto adjacent = *executableDirectory / "wii_bootstrap";
-        if (ExistingDirectory(adjacent / "shared2" / "wc24")) {
-            return adjacent;
-        }
-    }
-
-    // This makes developer-tree launches work without changing their release layout.
-    for (auto base = std::filesystem::current_path(); !base.empty();) {
-        const auto candidate = base / "runtime" / "assets" / "wii";
-        if (ExistingDirectory(candidate / "shared2" / "wc24")) {
-            return candidate;
-        }
-        const auto parent = base.parent_path();
-        if (parent == base) {
-            break;
-        }
-        base = parent;
-    }
-    return std::nullopt;
-}
-
-inline bool CopyBootstrapFile(const std::filesystem::path& sourceRoot,
-                              const std::filesystem::path& destinationRoot,
-                              const std::filesystem::path& relativePath,
-                              std::error_code& ec) {
-    const auto source = sourceRoot / relativePath;
-    const auto destination = destinationRoot / relativePath;
-    if (std::filesystem::exists(destination, ec)) {
-        return !ec;
-    }
-
-    std::filesystem::create_directories(destination.parent_path(), ec);
-    if (ec) {
-        return false;
-    }
-    std::filesystem::copy_file(source, destination, std::filesystem::copy_options::none, ec);
-    return !ec;
-}
-
-// Create these WC24 files only for a new profile; never overwrite user data.
-constexpr std::string_view kBootstrapFiles[] = {
-    "shared2/wc24/misc.bin",
-    "shared2/wc24/nwc24dl.bin",
-    "shared2/wc24/nwc24fl.bin",
-    "shared2/wc24/nwc24fls.bin",
-    "shared2/wc24/nwc24msg.cbk",
-    "shared2/wc24/nwc24msg.cfg",
-    "shared2/wc24/mbox/Readme.txt",
-    "shared2/wc24/mbox/wc24recv.ctl",
-    "shared2/wc24/mbox/wc24recv.mbx",
-    "shared2/wc24/mbox/wc24send.ctl",
-    "shared2/wc24/mbox/wc24send.mbx",
-};
-
-// Add first-run WC24 files only when the NAND has none yet.
-inline bool SeedMissingBootstrapFiles(const std::filesystem::path& root) {
-    const auto payload = BootstrapPayloadPath();
-    if (!payload) {
-        return false;
-    }
-    std::error_code ec;
-    for (const std::string_view file : kBootstrapFiles) {
-        const std::filesystem::path relativePath{std::string(file)};
-        ec.clear();
-        if (!CopyBootstrapFile(*payload, root, relativePath, ec)) {
-            RT_LOG(RT_TAG_NAND) << "could not create "
-                                << RuntimeConfigFile::PathToUtf8(root / relativePath)
-                                << std::endl;
-            return false;
-        }
-    }
-    return true;
-}
-
 inline std::filesystem::path CreateManagedNandRoot() {
     const std::filesystem::path root = ManagedNandRootPath();
     std::error_code ec;
     std::filesystem::create_directories(root, ec);
     if (ec || !std::filesystem::is_directory(root, ec)) {
         FailNandRoot("Unable to create managed NAND root", root);
-    }
-
-    if (!SeedMissingBootstrapFiles(root)) {
-        FailNandRoot("Unable to initialize managed NAND", root);
     }
 
     const auto marker = root / ".mkw_recompiled_managed_nand";
@@ -170,10 +90,6 @@ inline std::filesystem::path ResolveNandRootPath() {
     if (!configPath.empty()) {
         const auto path = ResolveConfiguredPath(configPath);
         if (auto existing = ExistingDirectory(path)) {
-            // Seed only a new configured NAND so existing frontend data stays unchanged.
-            if (!SeedMissingBootstrapFiles(*existing)) {
-                RT_LOG(RT_TAG_NAND) << "first-run WC24 seeding failed for the configured NAND root" << std::endl;
-            }
             return *existing;
         }
         FailNandRoot("Configured NAND root is not an existing directory", path);

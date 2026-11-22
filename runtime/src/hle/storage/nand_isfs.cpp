@@ -11,7 +11,6 @@
 #include "discord_presence.h"
 #include "runtime_log.h"
 
-extern "C" void OSSleepThread_HLE_801aa9b8(CpuContext* ctx);
 
 // ============================================================================
 // SHA device handles
@@ -457,8 +456,8 @@ static int32_t NAND_IOS_Open_Impl(uint32_t pathPtr, uint32_t mode) {
             const int32_t fd = AllocateShaFd();
             return fd;
         }
-        if (const int32_t netFd = Network_HLE_OpenDevice(path, mode)) {
-            return netFd;
+        if (const int32_t kdFd = KD_HLE_OpenDevice(path)) {
+            return kdFd;
         }
         if (const int32_t btFd = Bluetooth_HLE_OpenDevice(path)) {
             return btFd;
@@ -534,8 +533,8 @@ static int32_t NAND_IOS_Close_Impl(uint32_t fd) {
         CloseShaFd(static_cast<int32_t>(fd));
         return ISFS_OK;
     }
-    if (Network_HLE_IsFd(fd)) {
-        return Network_HLE_Close(fd);
+    if (KD_HLE_IsFd(fd)) {
+        return KD_HLE_Close(fd);
     }
     if (Bluetooth_HLE_IsFd(fd)) {
         return Bluetooth_HLE_Close(fd);
@@ -647,8 +646,8 @@ static int32_t NAND_IOS_Ioctl_Impl(
     uint32_t outBufPtr, uint32_t outLen)
 {
 
-    if (Network_HLE_IsFd(fd)) {
-        return Network_HLE_Ioctl(fd, cmd, inBufPtr, inLen, outBufPtr, outLen);
+    if (KD_HLE_IsFd(fd)) {
+        return KD_HLE_Ioctl(fd, cmd, inBufPtr, inLen, outBufPtr, outLen);
     }
 
     if (GetShaHandle(static_cast<int32_t>(fd))) {
@@ -832,70 +831,6 @@ static int32_t NAND_IOS_Ioctl_Impl(
     return ISFS_OK;
 }
 
-// The stack frame a guest thread parks on while a deferred network ioctl runs.
-// `newStack` is always oldStack - kFrameSize, even when the frame could not be
-// built, because the sleep path installs it unconditionally.
-struct IosWaitFrame {
-    bool valid = false;
-    uint32_t oldStack = 0;
-    uint32_t newStack = 0;
-    uint32_t waitQueue = 0;
-};
-
-static IosWaitFrame InitializeIosWaitQueueFrame(CpuContext* ctx) {
-    constexpr uint32_t kFrameSize = 0x40u;
-    constexpr uint32_t kWaitQueueOffset = 0x30u;
-
-    IosWaitFrame frame;
-    frame.oldStack = ctx->gpr[1];
-    frame.newStack = frame.oldStack - kFrameSize;
-    if (frame.oldStack < kFrameSize || !Memory::Contains(frame.newStack, kFrameSize)) {
-        return frame;
-    }
-    // Preserve the PPC linkage area and the required r3-r10 outgoing-argument
-    // save area. The queue lives in local storage beyond sp+0x28 so a guest
-    // switch callback cannot legally spill over it while this thread sleeps.
-    Memory::Write32(frame.newStack, frame.oldStack);
-    Memory::Write32(frame.newStack + 4u, 0);
-    Memory::Write32(frame.newStack + kWaitQueueOffset, 0);
-    Memory::Write32(frame.newStack + kWaitQueueOffset + 4u, 0);
-    frame.waitQueue = frame.newStack + kWaitQueueOffset;
-    frame.valid = true;
-    return frame;
-}
-
-static void FinishDeferredIosWait(CpuContext* ctx, uint32_t oldStack, uint64_t token) {
-    int32_t result = -101;
-    if (!Network_HLE_TakeSyncResult(token, &result)) {
-        RT_LOGF(RT_TAG_NAND,
-                     "deferred network waiter resumed without result token=%llu\n",
-                     static_cast<unsigned long long>(token));
-    }
-    ctx->gpr[1] = oldStack;
-    ctx->gpr[3] = static_cast<uint32_t>(result);
-}
-
-// IOS_Ioctl and IOS_Ioctlv park a network request the same way: build the wait
-// frame, hand its queue to the network layer, and either sleep on it or take the
-// immediate answer. True when the request was handled here.
-template <typename StartSync>
-static bool TryDeferredNetworkIosSync(CpuContext* ctx, StartSync&& startSync) {
-    const IosWaitFrame frame = InitializeIosWaitQueueFrame(ctx);
-    const auto deferred = startSync(frame.valid ? frame.waitQueue : 0u);
-    if (deferred.disposition == NetworkDeferredContract::StartDisposition::Started) {
-        ctx->gpr[1] = frame.newStack;
-        ctx->gpr[3] = frame.waitQueue;
-        OSSleepThread_HLE_801aa9b8(ctx);
-        FinishDeferredIosWait(ctx, frame.oldStack, deferred.token);
-        return true;
-    }
-    if (deferred.disposition == NetworkDeferredContract::StartDisposition::ImmediateResult) {
-        ctx->gpr[3] = static_cast<uint32_t>(deferred.result);
-        return true;
-    }
-    return false;
-}
-
 extern "C" void NAND_IOS_Ioctl_Entry_HLE(CpuContext* ctx) {
     const uint32_t fd = ctx->gpr[3];
     const uint32_t cmd = ctx->gpr[4];
@@ -903,15 +838,6 @@ extern "C" void NAND_IOS_Ioctl_Entry_HLE(CpuContext* ctx) {
     const uint32_t inLen = ctx->gpr[6];
     const uint32_t outBufPtr = ctx->gpr[7];
     const uint32_t outLen = ctx->gpr[8];
-
-    if (Network_HLE_IsFd(fd)) {
-        const bool handled = TryDeferredNetworkIosSync(ctx, [&](uint32_t waitQueue) {
-            return Network_HLE_StartIoctlSync(fd, cmd, inBufPtr, inLen, outBufPtr, outLen, waitQueue);
-        });
-        if (handled) {
-            return;
-        }
-    }
 
     ctx->gpr[3] = static_cast<uint32_t>(
         NAND_IOS_Ioctl_HLE(fd, cmd, inBufPtr, inLen, outBufPtr, outLen));
@@ -1114,8 +1040,8 @@ static int32_t NAND_IOS_Ioctlv_Impl(
     uint32_t vectorPtr)
 {
 
-    if (Network_HLE_IsFd(fd)) {
-        return Network_HLE_Ioctlv(fd, cmd, numIn, numOut, vectorPtr);
+    if (KD_HLE_IsFd(fd)) {
+        return KD_HLE_Ioctlv(fd, cmd, numIn, numOut, vectorPtr);
     }
     if (Bluetooth_HLE_IsFd(fd)) {
         return Bluetooth_HLE_Ioctlv(fd, cmd, numIn, numOut, vectorPtr);
@@ -1221,15 +1147,6 @@ extern "C" void NAND_IOS_Ioctlv_Entry_HLE(CpuContext* ctx) {
     const uint32_t numIn = ctx->gpr[5];
     const uint32_t numOut = ctx->gpr[6];
     const uint32_t vectorPtr = ctx->gpr[7];
-
-    if (Network_HLE_IsFd(fd)) {
-        const bool handled = TryDeferredNetworkIosSync(ctx, [&](uint32_t waitQueue) {
-            return Network_HLE_StartIoctlvSync(fd, cmd, numIn, numOut, vectorPtr, waitQueue);
-        });
-        if (handled) {
-            return;
-        }
-    }
 
     ctx->gpr[3] = static_cast<uint32_t>(
         NAND_IOS_Ioctlv_HLE(fd, cmd, numIn, numOut, vectorPtr));

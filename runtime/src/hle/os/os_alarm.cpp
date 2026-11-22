@@ -11,7 +11,6 @@
 #include "ppc_runtime.h"
 #include "runtime_log.h"
 #include "hle/bluetooth_hle.h"
-#include "hle/net/network.h"
 #include "guest_small_data.h"
 #include "os_internal.h"
 #include "guest_function_imports.h"
@@ -163,7 +162,7 @@ bool ProcessAlarmQueue(CpuContext* cpu, int maxToProcess)
     // Keep the alarm recursion guard scoped to alarm dispatch itself. IOS
     // completion may wake and immediately switch into a guest fiber; carrying
     // g_alarmProcessDepth across that switch would make the resumed fiber skip
-    // all alarm/network/callback pumping until this host frame ran again.
+    // all alarm/IOS-callback pumping until this host frame ran again.
     {
         AlarmProcessScope alarmProcessScope;
         SanitizeAlarmQueue(cpu);
@@ -228,14 +227,9 @@ bool ProcessAlarmQueue(CpuContext* cpu, int maxToProcess)
         }
     }
 
-    // Host DNS workers never touch guest memory. Commit their output here on
-    // the scheduler thread, waking synchronous IOS waiters or queuing async IOS
-    // callbacks before the callback drain below.
+    // Bluetooth completions are committed here on the scheduler thread, queuing
+    // async IOS callbacks before the callback drain below.
     bool completionNeedsReschedule = handledAny;
-    if (Network_HLE_ProcessCompletions(cpu)) {
-        handledAny = true;
-        completionNeedsReschedule = true;
-    }
     if (Bluetooth_HLE_ProcessCompletions(cpu)) {
         handledAny = true;
         completionNeedsReschedule = true;

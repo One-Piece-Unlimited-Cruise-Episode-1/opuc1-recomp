@@ -526,10 +526,8 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
     constexpr uint32_t kIPCArenaSize = 0x20000u;
     constexpr uint32_t kIosReservedSize = 0x20000u;
 
-    // The boot code exposes the current disc ID in low memory before DVDInit.
-    // Retro Rewind reads the region byte directly from here while building its
-    // Retro-WFC payload URL, and OSGetAppGamename reads the app code mirrors
-    // at 0x80003180/0x80003194 while building NAS auth fields.
+    // The boot code exposes the current disc ID in low memory before DVDInit,
+    // and OSGetAppGamename reads the app code mirrors at 0x80003180/0x80003194.
     entries.push_back({0x80000000u, ::GuestRegion::CurrentFacts().gameCode, "Disc game code"});
     entries.push_back({0x80000004u, 0x41460100u, "Disc maker/id"});  // OPUC: maker "AF" (boot.bin ROUPAF) + disc 1
     entries.push_back({0x80003180u, ::GuestRegion::CurrentFacts().gameCode, "OS app game code"});

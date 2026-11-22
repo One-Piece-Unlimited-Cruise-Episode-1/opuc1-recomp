@@ -135,6 +135,12 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   `OPUC_INPUT_SCRIPT` also takes `KEY_<SDL scancode name>` (e.g. `KEY_Left Shift`), `MOUSE_LEFT|MIDDLE|RIGHT` and
   `WHEEL` tokens that go through the scheme; `OPUC_TRACE_INPUT=1` logs hold-word / ui changes and shake pulses.
 - `runtime/src/hle/opuc/` holds OPUC-native HLE (`vi_opuc.cpp`: VIGetScanMode; `milestones.cpp`); the rebind tool skips it.
+- Offline runtime (2026-11-22): OPUC1 has no online features, so the inherited network HLE (sockets, SSL, DNS workers,
+  IP top, NCD, deferred network IOS waits), Mbed TLS, the CA bundle, the WiiConnect24 NAND seed tree, the `[network]`
+  config section and the translator's Mario Kart online-mod (Retro WFC) support are gone. A traced run from boot to
+  adventure state 3 showed the game opening only `/dev/net/kd/request` (ioctl 0x01, NWC24 scheduler suspend) and
+  `/dev/net/kd/time` (ioctl 0x17, set RTC counter); `hle/wc24/kd_offline.cpp` answers those locally and every other
+  `/dev/net` path fails like a missing device.
 
 - Basis: WiiCompiled (translator and runtime, GPL-3.0, with its aurora fork, MIT). See `docs/reference-study.md`.
   That name appears only where the basis is credited: README.md (Credits), docs/reference-study.md, the UPSTREAM.txt

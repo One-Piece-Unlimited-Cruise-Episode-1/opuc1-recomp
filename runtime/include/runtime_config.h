@@ -77,7 +77,6 @@ struct RuntimeUserConfig {
     // the window has focus instead of its desktop one (buttons bound to mouse and keyboard).
     std::optional<bool> steamInputOverride;
     std::optional<uint32_t> steamInputAppId;
-    std::optional<bool> networkEnabled;
     std::optional<bool> discordPresenceEnabled;
     // The application ID of the Discord application for Rich Presence. This is only
     // used by the base product; Retro Rewind supplies its own ID through the
@@ -320,8 +319,6 @@ inline void EnsureConfigFile() {
               "# guest can observe it. Set to false to mix inline on the guest\n"
               "# thread exactly as the runtime did before.\n"
               "mix_worker = true\n\n"
-              "[network]\n"
-              "enabled = true\n\n"
               "[controller]\n"
               "steam_input_override = true\n"
               "# steam_input_app_id = 480\n\n"
@@ -526,7 +523,6 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     if (const auto value = FindConfigUint(document, "controller", "steam_input_app_id"); value && *value != 0) {
         config.steamInputAppId = *value;
     }
-    config.networkEnabled = FindConfigValue<bool>(document, "network", "enabled");
     config.discordPresenceEnabled = FindConfigValue<bool>(document, "discord", "enabled");
     config.discordClientId = FindConfigValue<std::string>(document, "discord", "client_id");
 
@@ -1075,10 +1071,6 @@ inline std::string DisplayMode(std::string fallback = "windowed") {
     return Get().displayMode.value_or(std::move(fallback));
 }
 
-inline bool NetworkEnabled(bool fallback = true) {
-    return Get().networkEnabled.value_or(fallback);
-}
-
 inline std::string NandRoot(std::string fallback = "") {
     return Get().nandRoot.value_or(std::move(fallback));
 }
@@ -1177,9 +1169,6 @@ inline void LogLoadedConfig() {
             }
             if (config.audioMuted) {
                 std::cout << " audio_muted=" << (*config.audioMuted ? "true" : "false");
-            }
-            if (config.networkEnabled) {
-                std::cout << " network_enabled=" << (*config.networkEnabled ? "true" : "false");
             }
             if (config.discordPresenceEnabled) {
                 std::cout << " discord_enabled=" << (*config.discordPresenceEnabled ? "true" : "false");

@@ -50,6 +50,10 @@ In menus and windows the layout switches to menu use (WASD moves the cursor, Esc
 **An in-game settings bar.** Press **F10** in the game window for the runtime settings bar (resolution, controllers,
 volume). Changes go to `Config.toml`.
 
+**Offline only.** The game has no online features, so the runtime has no network stack: no sockets, TLS or
+WiiConnect24 service, and it never connects to the internet. The two local WiiConnect24 requests the game's SDK makes at
+boot (scheduler suspend, RTC counter) are answered on the spot.
+
 > [!WARNING]
 > This is work in progress. Audio is not done yet, and field play past the opening, battles, menus and full playthrough
 > parity with the original have not been checked. See [STATUS.md](STATUS.md) for the current milestone table, the
@@ -157,8 +161,8 @@ running in Dolphin.
 - **[Dawn](https://dawn.googlesource.com/dawn)** - Google's WebGPU implementation behind aurora's Direct3D, Vulkan and
   OpenGL backends.
 - **[Dolphin Emulator](https://github.com/dolphin-emu/dolphin)** - the reference for Wii hardware behaviour, the RVL SDK
-  signature database used to name SDK functions, and the source of the free DSP coefficient ROM and the default
-  WiiConnect24 bootstrap tree bundled with the runtime.
+  signature database used to name SDK functions, and the source of the free DSP coefficient ROM bundled with the
+  runtime.
 
 Bundled third-party components and their licenses are listed in [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md).
 
