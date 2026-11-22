@@ -1,0 +1,13 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "One Piece: Unlimited Cruise Episode 1",
+  "system": "Wii",
+  "type": "recomp",
+  "project": "One Piece: Unlimited Recompilation Episode 1",
+  "status": "in-development",
+  "targets": ["Windows"],
+  "approach": "Static recompilation of the PowerPC main.dol to C++ with a translator and an HLE runtime; no emulator, interpreter, or JIT at runtime.",
+  "original": [
+    { "region": "Europe", "serial": "ROUPAF" }
+  ]
+}

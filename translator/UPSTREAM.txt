@@ -1,0 +1,2 @@
+a170c801b3f117e1f4103f8d4d5f9ca8567098b3 2026-11-18 14:25:21 +0100
+based on: https://github.com/patchzyy/wiicompiled translator/ (GPL-3.0)

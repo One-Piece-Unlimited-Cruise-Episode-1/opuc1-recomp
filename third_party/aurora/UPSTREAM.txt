@@ -1,0 +1,1 @@
+based on: https://github.com/patchzyy/aurora-wiicompiled @ 5ba1388584fa9dc78f16208c7a9ae10802e14b1c (MIT, fork of encounter/aurora)

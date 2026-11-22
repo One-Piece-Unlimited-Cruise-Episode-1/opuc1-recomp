@@ -1,0 +1,24 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Windows scripts keep CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Patch files must stay LF: git apply matches context bytes against LF upstream sources
+*.patch -text
+
+# Binary assets
+*.bin binary
+*.db binary
+*.ico binary
+*.icns binary
+*.png binary
+
+# Generated tables
+projects/opuc1/MAP.txt linguist-generated=true
+projects/opuc1/dsy_matches.txt linguist-generated=true
+projects/opuc1/ghidra_functions.txt linguist-generated=true
+projects/opuc1/map_report.json linguist-generated=true
+projects/opuc1/rebind_report.md linguist-generated=true
+projects/mkwii-reference/MAP.txt linguist-generated=true

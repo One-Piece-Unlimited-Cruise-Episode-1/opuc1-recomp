@@ -1,0 +1,15 @@
+name: Feature request
+description: Suggest something the native build could do beyond the original game.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?

@@ -1,0 +1,75 @@
+name: Crash / freeze report
+description: The game crashed, froze, or stopped with an error.
+title: "[Crash] "
+labels: ["crash"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Crashes are almost impossible to fix without logs, so please fill this in fully.
+        `tools/run.ps1` writes `build/logs/run.log`; a direct run writes its log under the user data folder.
+        Never attach game files, translated sources or save data.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you continue
+      options:
+        - label: I built from the latest `main`.
+          required: true
+        - label: I searched the existing issues and nobody has reported this yet.
+          required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: when
+    attributes:
+      label: When does it happen?
+      options:
+        - During the build (translate / configure / compile)
+        - During startup, before the strap screen
+        - Strap screen, logos or title menu
+        - Opening movie or event
+        - Field play
+        - Battle
+        - Menus or windows in game
+        - Randomly / no clear pattern
+    validations:
+      required: true
+  - type: dropdown
+    id: repro
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Most of the time
+        - Sometimes
+        - Only once so far
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a new game
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Attach the run log, or paste its last lines.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: GPU, driver and Windows version
+      placeholder: "e.g. RTX 3060, driver 560.94, Windows 11 24H2"

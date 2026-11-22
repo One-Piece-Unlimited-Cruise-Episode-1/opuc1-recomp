@@ -1,0 +1,40 @@
+schema_version: 1
+workspace_root: ../..
+
+project:
+  id: opuc1-roupaf
+  display_name: One Piece Unlimited Cruise 1 PAL
+  game_id: ROUPAF
+  region: P
+  base_manifest_format: opuc1-recomp-base-manifest
+  base_manifest_stem: opuc1_base
+
+memory:
+  base: 0x80000000
+  size: 0x01800000          # MEM1 (24 MiB); DOL + bss end at 0x806909A8
+  sda_base: 0x8068FEA0      # r13, __init_registers 8000422c
+  sda2_base: 0x806939A0     # r2,  __init_registers 80004224
+
+inputs:
+  dol:
+    # sys/main.dol of the disc extracted with wit into data/extract/DATA at the repo root (6,206,336 bytes)
+    path: data/extract/DATA/sys/main.dol
+    sha256: 8f2777bc6e47d02b93ad9477f8b5633fc82c1eb3b186d0b87fa391350680c1c5
+
+translation:
+  entry_points:
+    - 0x8000403C            # __start (Boot::Start)
+  function_map:
+    path: projects/opuc1/MAP.txt
+  allow_unsupported_instructions: false
+
+runtime:
+  native_registration_root: runtime/src
+  native_abi_directories: []
+
+output:
+  root: generated
+  functions: functions
+  runtime_config: RuntimeConfig.h
+  data_initializer: data_sections_init.cpp
+  base_manifest: ../build/base/opuc1_base_manifest.json

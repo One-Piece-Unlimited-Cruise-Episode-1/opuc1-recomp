@@ -1,0 +1,56 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  translator:
+    name: Translator (build + test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore translator/Translator.sln
+
+      - name: Build
+        run: dotnet build translator/Translator.sln -c Release --no-restore
+
+      # The excluded tests read Mario Kart Wii project files (projects/mkwii*, region maps, Code.pul) that this
+      # repository does not carry.
+      - name: Test
+        shell: pwsh
+        run: >-
+          dotnet test translator/Translator.sln -c Release --no-build --verbosity normal
+          --filter "FullyQualifiedName!~ProductionTranslationPolicyTests.ProductionProjectIsStrict&FullyQualifiedName!~RuntimeNativeIndexTests.RepositoryWrapperNativesCallThroughToTheNextTranslation&FullyQualifiedName!~RuntimeNativeIndexTests.SerializedRepositoryIndexRoundTripsExactly&FullyQualifiedName!~GuestAddressTableTests.RepositoryMap&FullyQualifiedName!~GuestAddressTableTests.RuntimeGuestCallsAreFunctionEntriesInEveryRegion&FullyQualifiedName!~KamekPulFileTests.ParsesBundledRetroRewindCodePulWhenPresent"
+
+  tools:
+    name: Tools (binding check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check HLE bindings against the function map
+        run: node tools/check-bindings.mjs

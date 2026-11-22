@@ -1,0 +1,33 @@
+name: Behaviour differs from the original game
+description: Something looks, sounds or plays differently than the game on Wii or in Dolphin.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only report differences from the original game. Bugs that also happen on Wii or in Dolphin are the game's own.
+  - type: textarea
+    id: what
+    attributes:
+      label: What is different?
+      description: What this build does, and what the original game does at the same moment.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or a Dolphin comparison
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD`.
+    validations:
+      required: true

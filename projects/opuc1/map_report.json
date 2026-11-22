@@ -1,0 +1,21 @@
+{
+  "starts": 18669,
+  "named": 6337,
+  "bySrc": {
+    "pattern": 72,
+    "fixed": 5,
+    "manual": 235,
+    "dsy": 1097,
+    "ghidra": 4928
+  },
+  "sdkNamed": 1097,
+  "sdkAmbiguousNames": 50,
+  "dataPointerSeeds": 3273,
+  "codeConstantSeeds": 305,
+  "families": {
+    "_save_fpr_": "8029807c",
+    "_rest_fpr_": "802980c8",
+    "_save_gpr_": "80298114",
+    "_rest_gpr_": "80298160"
+  }
+}

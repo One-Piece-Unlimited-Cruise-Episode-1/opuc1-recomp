@@ -1,0 +1,1 @@
+MKWii PAL (RMCP01) function map from projects/mkwii/MAP.txt of the WiiCompiled base @ a170c80. Used only to translate the runtime's MKWii HLE addresses to OPUC addresses by symbol name (tools/rebind-runtime.mjs).

@@ -1,0 +1,339 @@
+# MKWii PAL address -> OPUC address overrides for tools/rebind-runtime.mjs
+# MKWADDR<TAB>OPUCADDR|unbound<TAB>note (cite the OPUC function/instruction)
+80347498	805ED9B8	DefaultThread (OSThread, 0x318): __OSThreadInit 802746cc lis r31,-0x7fa1; subi r31,r31,0x2648; state at +0x2c8 (802746e4)
+803477B0	805EDCD0	RunQueue[32] (8-byte OSThreadQueue each): __OSThreadInit 80274840 addi r4,r31,0x318, cleared 2x0x80 bytes
+803478B0	805EDDD0	IdleContext: __OSThreadInit 802748fc addi r3,r31,0x418 -> OSClearContext 8026d954
+80385AE0	80688B28	SwitchThreadCallback: __OSThreadInit 8027474c lwz r12,-0x7378(r13); bctrl
+80386918	8068A828	Reschedule (OSDisableScheduler count): __OSThreadInit 8027490c stw r29,-0x5678(r13) (=0); sbss order Reschedule < RunQueueHint < RunQueueBits as in MKWii
+8038691C	8068A82C	RunQueueHint: __OSThreadInit 80274844 stw r3,-0x5674(r13)
+80386920	8068A830	RunQueueBits: __OSThreadInit 8027483c stw r3,-0x5670(r13)
+803868A0	8068A7A8	AlarmQueue {head,tail}: __OSInitAlarm 8026bd84 subi r3,r13,0x56f8; head/tail zeroed 8026bd88/8026bd90
+803868F8	8068A800	InterruptHandlerTable pointer: __OSInterruptInit 80271a7c stw r3(=0x80003040),-0x56a0(r13)
+801A20BC	8026D978	OSInitContext: stores srr0 +0x198, sp +4, srr1 0x9032 +0x19c, r2 +8, r13 +0x34 (8026d978..8026d99c)
+80347130	805ED650	OSCreateThread 80274ea8 "fp context on" flag (decompile: if (DAT_805ed650 != 0) srr1 |= 0x900, psf init)
+80385AA8	80688AF8	OSCreateThread 80274ea8: context +0x194 = *(r13-0x73a8) & 0xf8 | 4
+80386448	8068AAD0	__AI_init_flag: AICheckInit 80288c28 lwz r3,-0x53d0(r13); AIInit sets 1 at 80288d90 (audio worker 2026-11-22)
+8038644C	8068AAD4	__AID_Active: __AIDHandler 80288e18 stw -0x53cc(r13)
+8038647C	8068AB04	__CallbackStack: AIInit 80288d7c stw r31,-0x539c(r13); __AICallbackStackSwitch 80288e8c (__OldStack 8068AB00)
+80386480	8068AB08	__AID_Callback: AIRegisterDMACallback 80288b20/28 -0x5398(r13)
+80123F88	80288B08	AIRegisterDMACallback (Dolphin signature put this name on 80283034 = VISetPreRetraceCallback, wrong); called by __AXOutInit 8028aee4
+80124094	80288C28	AICheckInit lwz -0x53d0(r13)
+80124048	80288BC8	AIStartDMA sets 0xCC005036 bit15 (AIStopDMA 80288bdc follows)
+8012405C	80288BF0	AIGetDMABytesLeft lhz 0x503a
+8012406C	80288C00	AIGetDMAStartAddr 0x5030/0x5032
+80124084	80288C18	AIGetDMALength 0x5036
+8012409C	unbound	AIGetDSPSampleRate not linked in OPUC (AICheckInit 80288c28 is followed directly by AIInit 80288c30)
+8015D3FC	8028F728	DSPCheckMailToDSP (0x5000 bit15)
+8015D40C	8028F738	DSPCheckMailFromDSP (0x5004)
+8015D41C	8028F748	DSPReadMailFromDSP
+8015D430	8028F75C	DSPSendMailToDSP
+8015D504	8028F830	DSPCheckInit lwz -0x5250(r13)
+8015D50C	8028F838	DSPAddTask (calls __DSP_insert_task 80290158, __DSP_boot_task 8028ffcc)
+8015D57C	8028F8E8	DSPAssertTask (DSPCancelTask 8028f8a8 sits between)
+801269BC	8028ACE8	__AXOutInitDSP: only caller of DSPAddTask (8028adac)
+800A35E0	unbound	nw4r SoundPlayer::SetVolume: no standalone copy found next to SoundPlayer 8031d29c; MusicAttenuation stub
+80388588	8068EAB8	1.0f: AXFXReverbStdExpCallback 8028e310 lfs f2,-0x4ee8(r2); memory 3f800000
+8038858C	8068EABC	0.6f: AXFXReverbStdExpCallback 8028e320 lfs f3,-0x4ee4(r2); memory 3f19999a
+8012B830	8028E284	AXFXReverbStdExpCallback (0x36c bytes as MKWii; nw4r calls it at 80310e00)
+802F81A0	805F7C20	AX DSPTaskInfo: __AXOutInitDSP 8028ad1c/20 lis r30,0x805f; addi 0x7c20
+80386608	8068AC50	__DSP_init_flag: DSPInit 8028f814, DSPCheckInit
+80386610	8068AC58	DSP assert pending: DSPAssertTask 8028f91c -0x5248(r13)
+80386614	8068AC5C	DSP assert task: DSPAssertTask 8028f918 -0x5244(r13)
+80386618	8068AC60	DSP task global cleared by DSPInit 8028f804 -0x5240(r13)
+8038661C	8068AC64	DSPInit 8028f80c -0x523c(r13)
+80386620	8068AC68	first task: DSPAddTask 8028f878 -0x5238(r13)
+80386624	8068AC6C	current task: DSPAssertTask 8028f904 -0x5234(r13)
+8027F820	805B3100	AX IRAM ucode: task+0x0c at 8028ad5c (lis 0x805b; addi 0x3100); bytes 029f0f3a
+802F8200	805F7C80	AX DRAM image: task+0x18 at 8028ad68 (=task+0x60 as in MKWii)
+80126948	8028AC74	__AXDSPInitCallback: task+0x28 (8028ad7c); li r0,1; stw -0x52e8(r13)
+80126954	8028AC80	__AXDSPResumeCallback: task+0x2c
+801269A8	8028ACD4	__AXDSPDoneCallback: task+0x30; sets -0x52ec(r13)=1, wakes queue r13-0x52f8
+801269B8	8028ACE4	__AXDSPRequestCallback: task+0x34; lone blr
+80385800	80688C10	ucode init vector (=0x0010): lhz -0x7290(r13) -> task+0x24
+80385802	80688C12	ucode resume vector (=0x0037): lhz -0x728e(r13) -> task+0x26
+80385804	80688C14	ucode length (=0x2000): lhz -0x728c(r13) -> task+0x10
+80386528	8068ABB8	__AXDSPInitFlag: set by init callback; __AXOutInitDSP spins at 8028adb0
+80386524	8068ABB4	__AXDSPDoneFlag: done callback; __AXOutAiCallback 8028abd0 reads it
+801A7DFC	80272AC0	__OSInitMemoryProtection: only writer of MI 0xCC004020 (sth 80272aec); called from OSInit 8026b580
+801A8A50	802739D4	OSGetResetCode: reads PI reset code 0xCC003024 (lwz 802739f8) unless the boot-info reset flag at 0x805ED5A0 is set
+803867EC	8068AD94	IPC current buffer lo: IPC init 802b6cac stw r3,-0x510c(r13) (Hi=-0x5100, Lo=-0x5104, CurrentHi=-0x5108, CurrentLo=-0x510c, init byte -0x5110)
+80386934	8068A844	STM ready flag: __OSInitSTM 80276498 -0x565c(r13)
+80386938	8068A848	STM /dev/stm/immediate handle: __OSInitSTM 802764f8 -0x5658(r13)
+8038693C	8068A84C	STM /dev/stm/eventhook handle: __OSInitSTM 80276520 -0x5654(r13)
+803886C8	8068EB20	__GXData ptr (sdata2): GXSetCullMode 802939d0 lwz r4,-0x4e80(r2); value 806094C0 (GX worker 2026-11-22)
+803437C0	806094C0	gxData (GXData 0x600): static value of __GXData; GXInit 80290660 lwz r31,-0x4e80(r2), stb 0x5f8/0x5f9/0x5fa
+80343740	80609440	FifoObj: GXInit 802906b0 lis r28,-0x7f9f; subi r3,r28,0x6bc0
+80343DE4	80609AE4	CPUFifo (0x24): __GXFifoInit 80291dd4 subi r3,r3,0x651c, memset 0x24
+80343DC0	80609AC0	GPFifo (0x24): __GXFifoInit 80291de8 subi r3,r3,0x6540
+803867C4	8068ACAC	__GXCurrentThread: __GXFifoInit 80291dc4 stw r3,-0x51f4(r13)
+803867C0	8068ACA8	GXOverflowSuspendInProgress: __GXFifoInit 80291dd0 stw 0,-0x51f8(r13)
+803867B0	8068AC98	CPUFifoReady: __GXFifoInit 80291df4 stb -0x5208(r13)
+803867B1	8068AC99	GPFifoReady: __GXFifoInit 80291df8 stb -0x5207(r13); __GXIsGPFifoReady 80291ca8
+803867D0	8068ACB8	FinishQueue: __GXPEInit 8029342c OSInitThreadQueue(r13-0x51e8)
+803867D8	8068ACC0	DrawDone flag: GXSetDrawDone 802930e4 stb 0,-0x51e0(r13); GXFinishInterruptHandler 802933ac sets 1
+80344090	80609B08	DisplayListFifo: GXBeginDisplayList 80296bb4 subi r31,r31,0x64f8
+80344094	80609B0C	DLFifo+4 top: 80296c04
+80344098	80609B10	DLFifo+8 size: 80296c08
+803440A4	80609B1C	DLFifo+0x14: 80296c10
+803440A8	80609B20	DLFifo+0x18: 80296c14
+803440AC	80609B24	DLFifo+0x1C count: 80296c0c; GXGetFifoCount 80291d40
+80344110	80609B88	__savedGXdata (0x600): 80296be4 addi r3,r31,0x80; memcpy 0x600
+80344710	8060A188	OldCPUFifo: 80296c20 addi r3,r31,0x680
+8016CF10	unbound	GXGetCPUFifo 80291cb0 returns BOOL in OPUC (copies only if CPUFifoReady); upstream HLE is void: run translated
+80172E00	80296B98	GXBeginDisplayList: same field stores as upstream HLE
+80172EB4	80296C4C	GXEndDisplayList: GXGetFifoWrap 80291d48, GXGetFifoCount 80291d40
+8016EAB0	unbound	GXSetDrawDone 802930e4: OPUC has no GXDrawDone; HLE semantics (flush + flag=1) unverified against inlined waits (803eef70, 803df450, 804e8844)
+8016E9FC	unbound	GXSetDrawSync not linked in OPUC
+8016EB70	80293188	GXPixModeSync: BP peCtrl gd+0x22C
+80171C28	80295EF0	__GXFlushTextureState: BP gd+0x174
+8016E6B0	80292D98	GXResetWriteGatherPipe: PPCMtwpar(0x0C008000)
+8016ED50	80293368	GXSetDrawDoneCallback: r13-0x51dc
+8016F438	80293B90	GXSetDispCopySrc: gd+0x230/0x234
+8016F478	80293BD0	GXSetTexCopySrc: gd+0x240/0x244
+8016F4B8	80293C10	GXSetDispCopyDst: gd+0x238
+8016FC24	802942F0	GXSetDispCopyGamma: gd+0x23C bits 7-8
+8016F5F8	80293D50	GXSetDispCopyFrame2Field: gd+0x23C/0x24C bits 12-13
+8016F618	80293D70	GXSetCopyClamp: gd+0x23C/0x24C bits 0-1
+8016FECC	80294598	GXClearBoundingBox: BP 0x550003FF/0x560003FF
+80171BA0	80295D18	GXSetTevIndWarp: calls GXSetTevIndirect 80295924
+8017039C	802947BC	GXSetChanAmbColor: gd+0xA8/0xAC
+8017054C	8029496C	GXSetNumChans: genMode bits 4-6
+801727CC	80296934	GXSetColorUpdate: cmode0 gd+0x220 bit3
+80172824	8029698C	GXSetZMode: gd+0x228
+80172930	80296A98	GXSetDither: cmode0 bit2
+8016F3E0	802939F8	GXSetCoPlanar: genMode bit19, BP 0xFE080000
+8017351C	802971AC	GXSetClipMode: XF 0x1005
+801722A8	80296570	GXSetNumTevStages: genMode bits 10-13
+80171CE0	80295FA8	GXSetTevColorIn: gd+0x180
+80171D20	80295FE8	GXSetTevAlphaIn: gd+0x1C0
+80171D60	80296028	GXSetTevColorOp: gd+0x180
+80171DB8	80296080	GXSetTevAlphaOp: gd+0x1C0 teva shadow, BP 0x61 (80296090 lwz r11,0x1c0(r9); 802960c8 stw to WG pipe)
+8012E630	8026A6B4	PPCMfhid2: 8026a6b4 mfspr r3,HID2; blr (PPCMthid2 8026a6bc follows); caller THPVideoDecode 804b42e0 tests 0x10000000
+80171F30	802961F8	GXSetTevKColorSel: gd+0x200
+80170B64	80294F84	GXInitTexObjTlut: obj+0x18
+80170B6C	80294F8C	GXInitTexObjFilter
+80170BE8	80294FB4	GXInitTexObjUserData: obj+0x10
+80170F80	802951D8	GXInitTlutObj
+80173378	80297070	GXSetViewportJitter: gd+0x544..0x558
+801733B4	802970AC	GXSetViewport
+80173400	802970D8	GXSetZScaleOffset: gd+0x55C/0x560
+801734E0	80297170	GXSetScissorBoxOffset: BP 0x59
+80173214	80296F0C	GXSetCurrentMtx: gd+0x80
+8016DC34	802925FC	GXClearVtxDesc: gd+0x14=0x200
+8016E32C	80292A14	GXSetArray: CP 0xA0/0xB0
+8016E5A4	80292C8C	GXSetNumTexGens
+8016F37C	80293994	GXEnableTexOffsets: gd+0x108[i]
+8016F314	8029392C	GXSetLineWidth: gd+0x7C
+8016F348	80293960	GXSetPointSize
+8016D9F0	unbound	GX SDK function not linked in OPUC (GX worker)
+8016DBA4	unbound	GX SDK function not linked in OPUC (GX worker)
+8016E04C	unbound	GX SDK function not linked in OPUC (GX worker)
+8016E2B8	unbound	GX SDK function not linked in OPUC (GX worker)
+80170B94	unbound	GX SDK function not linked in OPUC (GX worker)
+80170BF8	unbound	GX SDK function not linked in OPUC (GX worker)
+80170CBC	unbound	GX SDK function not linked in OPUC (GX worker)
+80171180	unbound	GX SDK function not linked in OPUC (GX worker)
+801711FC	unbound	GX SDK function not linked in OPUC (GX worker)
+801730CC	unbound	GX SDK function not linked in OPUC (GX worker)
+8017315C	unbound	GX SDK function not linked in OPUC (GX worker)
+801731E0	unbound	GX SDK function not linked in OPUC (GX worker)
+801733E0	unbound	GX SDK function not linked in OPUC (GX worker)
+80172A30	unbound	GX SDK function not linked in OPUC (GX worker)
+8016E1C4	unbound	MKWii switch/jump-table piece
+80170938	unbound	MKWii switch/jump-table piece
+8017093C	unbound	MKWii switch/jump-table piece
+80170950	unbound	MKWii switch/jump-table piece
+80170964	unbound	MKWii switch/jump-table piece
+80170978	unbound	MKWii switch/jump-table piece
+8017098C	unbound	MKWii switch/jump-table piece
+801709A0	unbound	MKWii switch/jump-table piece
+80044B30	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80048C30	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+800847C0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80084D20	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+8021B344	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+8021B688	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+8022E2BC	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+8020FF9C	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80219FB4	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+802574A0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+802574E0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80257520	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80257540	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388B80	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388BA0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388BC0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388BE0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388DD0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388DE0	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80388DF4	unbound	MKWii game code/data (GXEnd copies, nw4r::lyt::DrawQuad, EGG)
+80343230	805F3470	DVD/NAND worker 2026-11-22: DVD WaitingQueue[4]: __DVDClearWaitingQueue 8027ef8c writes 4x{self,self}
+80386664	8068A8F0	DVD/NAND worker 2026-11-22: Canceling: __DVDPrepareReset 8027ee2c r13-0x55b0
+80386668	8068A8F4	DVD/NAND worker 2026-11-22: ResumeFromHere: stateReady 8027d168 r13-0x55ac
+80386670	8068A8E8	DVD/NAND worker 2026-11-22: PausingFlag: stateReady/DVDResume 8027e750 r13-0x55b8 (mapped by meaning)
+8038667C	unbound	DVD/NAND worker 2026-11-22: CancelAllSyncComplete: DVDCancelAll not linked in OPUC
+803866A0	8068A91C	DVD/NAND worker 2026-11-22: DVDInitialized: DVDInit 8027a584 lwz r0,-0x5584(r13), set 8027a59c
+803866A8	8068A924	DVD/NAND worker 2026-11-22: PrepareReset done: __DVDPrepareReset r13-0x557c
+803866F0	8068A970	DVD/NAND worker 2026-11-22: executing: DVDGetDriveStatus 8027e6a4 r13-0x5530
+80386720	8068A9A0	DVD/NAND worker 2026-11-22: DVDLow next context: DVDLowInit 80280430 stw r5,-0x5500(r13)
+80386724	8068A9A4	DVD/NAND worker 2026-11-22: DVDLow contexts initialised (u8): 80280434 stb -0x54fc
+80386725	8068A9A5	DVD/NAND worker 2026-11-22: DVDLowInit called (u8): 802802bc stb -0x54fb
+803434E0	805F3720	DVD/NAND worker 2026-11-22: DVDLow contexts[4] x0x20: DVDLowInit 802803c8; magic 0xFEEBDAED +0xC
+8015DF1C	80279A70	DVD/NAND worker 2026-11-22: __DVDFSInit: lwz r4,0x38(0x80000000) at 80279a78
+8015EA1C	8027A570	DVD/NAND worker 2026-11-22: DVDInit: DVDLowInit 8027a5a0, __DVDFSInit 8027a60c, __DVDClearWaitingQueue 8027a610
+801643FC	8027FE44	DVD/NAND worker 2026-11-22: __DVDCheckDevice: unencrypted read 0x460a0000
+80166964	80282520	DVD/NAND worker 2026-11-22: DVDLowClearCoverInterrupt: ioctl 0x86 (80280FEC is DVDLowClosePartition, ioctl 0x8C)
+80346D20	8060CFA0	DVD/NAND worker 2026-11-22: NAND s_homeDir: NANDInit 802bb610, NANDGetHomeDir 802bbbe8
+80386848	8068ADC8	DVD/NAND worker 2026-11-22: NAND libState (2=ready): nandIsInitialized 802bb32c lwz -0x50d8
+8019E18C	802BB610	DVD/NAND worker 2026-11-22: NANDInit
+8019EAD0	unbound	DVD/NAND worker 2026-11-22: NANDCheck not linked; OPUC links NANDCheckAsync 802bc1ac
+8019C800	802B9F00	DVD/NAND worker 2026-11-22: NANDOpen: nandOpen(...,0,0)
+8019CA80	802BA180	DVD/NAND worker 2026-11-22: NANDClose
+8019B7A4	802B93B0	DVD/NAND worker 2026-11-22: NANDRead: ISFS_Read 802b6a0c -> IOS_Read 802b79b0
+8019B884	802B9490	DVD/NAND worker 2026-11-22: NANDWrite: ISFS_Write 802b6ad0 -> IOS_Write 802b7bb8 (Dolphin signature swapped Read/Write)
+8019B80C	802B9418	DVD/NAND worker 2026-11-22: NANDReadAsync
+8019B8EC	802B94F8	DVD/NAND worker 2026-11-22: NANDWriteAsync
+8019BF4C	802B98DC	DVD/NAND worker 2026-11-22: NANDGetLength: ISFS_GetFileStats 802b68ac
+8019BBE0	unbound	DVD/NAND worker 2026-11-22: NANDCreateDir (sync) not linked
+8019BEE8	unbound	DVD/NAND worker 2026-11-22: NANDMove not linked
+8019C380	802B9C0C	DVD/NAND worker 2026-11-22: NANDGetStatus
+8019E770	unbound	DVD/NAND worker 2026-11-22: NANDGetType (sync) not linked
+8015BC80	unbound	DVD/NAND worker 2026-11-22: contentFastOpenNAND (libcnt): no counterpart found
+8015BCF8	unbound	DVD/NAND worker 2026-11-22: contentReadNAND (libcnt): no counterpart found
+8019C918	802BA018	DVD/NAND worker 2026-11-22: NANDOpenAsync: nandOpen(..,1,0)
+8019C990	802BA090	DVD/NAND worker 2026-11-22: NANDPrivateOpenAsync: nandOpen(..,1,1)
+8019CAEC	802BA1EC	DVD/NAND worker 2026-11-22: NANDCloseAsync
+8019C048	unbound	DVD/NAND worker 2026-11-22: NANDGetLengthAsync not linked
+8019D104	802BA274	DVD/NAND worker 2026-11-22: NANDPrivateSafeOpenAsync
+8019BCC8	802B9864	DVD/NAND worker 2026-11-22: NANDPrivateCreateDirAsync: nandCreateDir(..,1,1)
+8019B524	802B9058	DVD/NAND worker 2026-11-22: NANDPrivateCreateAsync: nandCreate(..,1,1)
+8019C448	802B9D58	DVD/NAND worker 2026-11-22: NANDPrivateGetStatusAsync
+8019E7B4	802BBF4C	DVD/NAND worker 2026-11-22: NANDPrivateGetTypeAsync
+8019CB74	unbound	DVD/NAND worker 2026-11-22: NANDSafeOpen (sync) not linked
+8019CF28	unbound	DVD/NAND worker 2026-11-22: NANDSafeClose (sync) not linked
+80385920	80688CC8	DVD/NAND worker 2026-11-22: __fsFd: ISFS_OpenLib 802b5714 stw -0x71d8
+80385928	80688CD0	DVD/NAND worker 2026-11-22: "/dev/fs": ISFS_OpenLib 802b56fc subi r4,r13,0x71d0
+803867F0	8068AD98	DVD/NAND worker 2026-11-22: IPC current buffer hi: IPCGetBufferHi 802b6d60 lwz -0x5108
+80386770	8068AD78	DVD/NAND worker 2026-11-22: ISFS heap initialised: ISFS_OpenLib -0x5128
+80386774	8068AD7C	DVD/NAND worker 2026-11-22: ISFS heap base: -0x5124
+8038677C	8068AD84	DVD/NAND worker 2026-11-22: ISFS arena lo: -0x511c
+80386780	8068AD88	DVD/NAND worker 2026-11-22: ISFS arena hi: -0x5118
+80386784	8068AD8C	DVD/NAND worker 2026-11-22: ISFS heap handle: -0x5114
+80169BCC	802B5684	DVD/NAND worker 2026-11-22: ISFS_OpenLib
+80193040	802B6D70	DVD/NAND worker 2026-11-22: IPCSetBufferLo: stw r3,-0x510c(r13)
+801938F8	802B7628	DVD/NAND worker 2026-11-22: IOS_Open (cmd 1)
+801938FC	unbound	DVD/NAND worker 2026-11-22: IOS_Open body entry in MKWii; OPUC 802b762c is mid-function (not a start)
+80193AD8	802B7808	DVD/NAND worker 2026-11-22: IOS_Close
+80193C80	802B79B0	DVD/NAND worker 2026-11-22: IOS_Read
+80193E88	802B7BB8	DVD/NAND worker 2026-11-22: IOS_Write
+80194070	802B7DA0	DVD/NAND worker 2026-11-22: IOS_Seek
+80194290	802B7FC0	DVD/NAND worker 2026-11-22: IOS_Ioctl
+801945E0	802B8310	DVD/NAND worker 2026-11-22: IOS_Ioctlv
+801937E0	802B7510	DVD/NAND worker 2026-11-22: IOS_OpenAsync
+80193A18	802B7748	DVD/NAND worker 2026-11-22: IOS_CloseAsync
+80193B80	802B78B0	DVD/NAND worker 2026-11-22: IOS_ReadAsync
+80193D88	802B7AB8	DVD/NAND worker 2026-11-22: IOS_WriteAsync
+80193F90	802B7CC0	DVD/NAND worker 2026-11-22: IOS_SeekAsync
+80194158	802B7E88	DVD/NAND worker 2026-11-22: IOS_IoctlAsync
+801944FC	802B822C	DVD/NAND worker 2026-11-22: IOS_IoctlvAsync
+80193010	802B6D40	DVD/NAND worker 2026-11-22: IPCReadReg: lwzx 0xCD000000+reg*4
+80193020	802B6D50	DVD/NAND worker 2026-11-22: IPCWriteReg
+80386940	8068A850	VI/OS worker 2026-11-22: StmEhRegistered: __OSInitSTM 80276578; OSSetPowerCallback 802763f0
+80386948	8068A858	VI/OS worker 2026-11-22: PowerCallback: OSSetPowerCallback 802763ec stw -0x5648(r13)
+801ABC0C	8027681C	VI/OS worker 2026-11-22: __OSDefaultPowerCallback (blr): OSSetPowerCallback 802763e4; reset default is 80276818
+80386B38	8068A9C0	VI/OS worker 2026-11-22: VI IsInitialized (32-bit): VIInit 802833f8/80283414
+80386B44	8068A9CC	VI/OS worker 2026-11-22: VI dimming-pending (32-bit): VIInit 802838e4; __VIRetraceHandler 80282d84
+80386BA0	8068AA28	VI/OS worker 2026-11-22: VI CurrBufAddr by offset (+0x303E88): __VIRetraceHandler 80282af4 (NextBufAddr is 8068AA2C)
+80386BA8	8068AA30	VI/OS worker 2026-11-22: VI CurrTvMode: VIInit 80283670
+80386BB4	8068AA3C	VI/OS worker 2026-11-22: VI PostCB: VISetPostRetraceCallback 80283098
+80386BB8	8068AA40	VI/OS worker 2026-11-22: VI PreCB: VISetPreRetraceCallback 80283054
+80386BC0	8068AA48	VI/OS worker 2026-11-22: VI retraceQueue: VIWaitForRetrace 8028394c
+80386BE4	8068AA6C	VI/OS worker 2026-11-22: VI retraceCount: VIGetRetraceCount 80284adc
+80350864	805F39D4	VI/OS worker 2026-11-22: HorVer.DispSizeX (HorVer 805F39D0, VIConfigure 80284058)
+80350866	805F39D6	VI/OS worker 2026-11-22: HorVer.DispSizeY (VIConfigure 802840ac)
+80350872	805F39E2	VI/OS worker 2026-11-22: HorVer.FBSizeX (VIConfigure 8028405c)
+8035087C	805F39EC	VI/OS worker 2026-11-22: HorVer.PanSizeY (VIConfigure 8028406c)
+80350890	805F3A00	VI/OS worker 2026-11-22: HorVer.bufAddr: VISetNextFrameBuffer 80284a24
+8029CEB0	805B7B58	VI/OS worker 2026-11-22: SC area table: SCGetProductArea 802be980
+8029CEF8	805B7BA0	VI/OS worker 2026-11-22: SC game-region table: SCGetProductGameRegion 802bea04 (5 entries + 0xFF)
+803869E0	unbound	VI/OS worker 2026-11-22: SCGetProductCode not linked
+801A1F58	8026D814	VI/OS worker 2026-11-22: OSLoadContext
+801A15EC	8026CE40	VI/OS worker 2026-11-22: DCEnable
+801A1600	8026CE54	VI/OS worker 2026-11-22: DCInvalidateRange (dcbi)
+801A162C	8026CE80	VI/OS worker 2026-11-22: DCFlushRange
+801A165C	8026CEB0	VI/OS worker 2026-11-22: DCStoreRange
+801A168C	8026CEE0	VI/OS worker 2026-11-22: DCFlushRangeNoSync
+801A16B8	unbound	VI/OS worker 2026-11-22: DCStoreRangeNoSync not linked
+801A16E4	8026CF0C	VI/OS worker 2026-11-22: DCZeroRange
+801A1710	8026CF38	VI/OS worker 2026-11-22: ICInvalidateRange
+801A1744	8026CF6C	VI/OS worker 2026-11-22: ICFlashInvalidate
+801A1754	8026CF7C	VI/OS worker 2026-11-22: ICEnable
+801A1834	8026D05C	VI/OS worker 2026-11-22: LCEnable
+801A186C	8026D094	VI/OS worker 2026-11-22: LCDisable
+801A1894	8026D0BC	VI/OS worker 2026-11-22: LCLoadBlocks
+801A18B8	8026D0E0	VI/OS worker 2026-11-22: LCStoreBlocks
+801A197C	unbound	VI/OS worker 2026-11-22: LCQueueLength not linked
+801A1988	8026D244	VI/OS worker 2026-11-22: LCQueueWait
+801A98B0	8027493C	VI/OS worker 2026-11-22: OSGetCurrentThread (lwz 0x800000E4)
+801A4EC4	8026FF58	VI/OS worker 2026-11-22: OSFatal
+801301B4	802D4C30	VI/OS worker 2026-11-22: GKI_delay
+8019F33C	8026A9D4	VI/OS worker 2026-11-22: OSGetConsoleType
+801A8A80	80273A04	VI/OS worker 2026-11-22: OSResetSystem
+80006348	800042E0	VI/OS worker 2026-11-22: __init_hardware
+8012E574	8026A5F8	VI/OS worker 2026-11-22: PPCMfhid0
+8012E57C	8026A600	VI/OS worker 2026-11-22: PPCMthid0
+8012E594	8026A618	VI/OS worker 2026-11-22: PPCMtdec
+8012E59C	8026A620	VI/OS worker 2026-11-22: PPCSync
+8012E5A4	8026A628	VI/OS worker 2026-11-22: PPCHalt
+8012E5B8	8026A63C	VI/OS worker 2026-11-22: PPCMtmmcr0
+8012E5C0	8026A644	VI/OS worker 2026-11-22: PPCMtmmcr1
+8012E5C8	8026A64C	VI/OS worker 2026-11-22: PPCMtpmc1
+8012E5D0	8026A654	VI/OS worker 2026-11-22: PPCMtpmc2
+8012E5D8	8026A65C	VI/OS worker 2026-11-22: PPCMtpmc3
+8012E5E0	8026A664	VI/OS worker 2026-11-22: PPCMtpmc4
+8012E638	8026A6BC	VI/OS worker 2026-11-22: PPCMthid2
+8012E640	8026A6C4	VI/OS worker 2026-11-22: PPCMfwpar
+8012E64C	8026A6D0	VI/OS worker 2026-11-22: PPCMtwpar
+8012E654	8026A6D8	VI/OS worker 2026-11-22: PPCDisableSpeculation
+801A65AC	802719E4	VI/OS worker 2026-11-22: OSDisableInterrupts
+801A65C0	802719F8	VI/OS worker 2026-11-22: OSEnableInterrupts
+801A65D4	80271A0C	VI/OS worker 2026-11-22: OSRestoreInterrupts
+801A65F8	80271A30	VI/OS worker 2026-11-22: __OSSetInterruptHandler
+801A66E0	80271B18	VI/OS worker 2026-11-22: SetInterruptMask
+801AB75C	802763AC	VI/OS worker 2026-11-22: OSSetPowerCallback
+801A25D0	8026DD60	VI/OS worker 2026-11-22: OSReport
+801AACA8	80275BA4	VI/OS worker 2026-11-22: OSSleepTicks
+801AA1D4	802751F8	VI/OS worker 2026-11-22: OSCancelThread
+801AA3AC	802753D8	VI/OS worker 2026-11-22: OSJoinThread
+801AA4EC	unbound	VI/OS worker 2026-11-22: OSDetachThread not linked
+801AA6A8	802757B0	VI/OS worker 2026-11-22: OSSuspendThread (called by OSSleepTicks 80275c18)
+801AAD5C	80275C4C	VI/OS worker 2026-11-22: OSGetTime
+801B0220	802BCAFC	VI/OS worker 2026-11-22: SCCheckStatus
+801B1BE4	802BE3C0	VI/OS worker 2026-11-22: SCGetAspectRatio
+801B1CAC	802BE488	VI/OS worker 2026-11-22: SCGetEuRgb60Mode
+801B2424	unbound	VI/OS worker 2026-11-22: SCGetProductCode not linked
+801B2460	unbound	VI/OS worker 2026-11-22: SCGetProductSN not linked
+801B24C8	802BE9E0	VI/OS worker 2026-11-22: SCGetProductGameRegion
+801AE4A0	unbound	VI/OS worker 2026-11-22: OSIsTitleInstalled not linked
+801AD1D4	unbound	VI/OS worker 2026-11-22: OSCheckInstall not linked
+801B94A4	802833E4	VI/OS worker 2026-11-22: VIInit
+801B9934	unbound	VI/OS worker 2026-11-22: VIInit case 0 label (mid-function 80283874)
+801B993C	unbound	VI/OS worker 2026-11-22: VIInit case 1 label (mid-function 8028387c)
+801B9944	unbound	VI/OS worker 2026-11-22: VIInit case 2 label (mid-function 80283884)
+801B90F4	80283034	VI/OS worker 2026-11-22: VISetPreRetraceCallback
+801B9138	80283078	VI/OS worker 2026-11-22: VISetPostRetraceCallback
+801BAD38	80284CD0	VI/OS worker 2026-11-22: VIGetDTVStatus
+801B9F6C	80283EAC	VI/OS worker 2026-11-22: VIConfigure
+801BAB24	unbound	VI/OS worker 2026-11-22: VIGetNextFrameBuffer not linked
+801BABA4	80284ADC	VI/OS worker 2026-11-22: VIGetRetraceCount
+801671D0	804B7E24	VI/OS worker 2026-11-22: ESP_InitLib
+80167224	804B7E78	VI/OS worker 2026-11-22: ESP_CloseLib
+8016799C	804B83AC	VI/OS worker 2026-11-22: ESP_GetTitleId
+80167904	804B8314	VI/OS worker 2026-11-22: ESP_GetDataDir
+8055531C	unbound	VI/OS worker 2026-11-22: MKWii game code (RelProlog)
+805529A8	unbound	VI/OS worker 2026-11-22: MKWii game code (THP)
+80552A74	unbound	VI/OS worker 2026-11-22: MKWii game code (THP)
+8024373C	unbound	VI/OS worker 2026-11-22: MKWii game code (EGG::Thread)
+80386F60	unbound	VI/OS worker 2026-11-22: MKWii game code (EGG system)
+80386298	unbound	VI/OS worker 2026-11-22: MKWii game code (RFL manager)
+800BD860	unbound	VI/OS worker 2026-11-22: MKWii game code (RFLiIsWorking)

@@ -1,0 +1,49 @@
+# Outputs: rebuilt from the disc dump by tools/build.ps1; they contain translated game code, never commit.
+/build/
+/build-*/
+/generated/
+/runtime/native-index.json
+
+# Your own game files (extracted disc, SYSCONF, Dolphin DB). data/ may be a folder or a directory link.
+/data
+*.dol
+*.rel
+*.iso
+*.rvz
+*.wbfs
+*.wia
+*.gcz
+*.ciso
+*.gcm
+*.nkit
+*.wad
+*.aar
+*.thp
+*.tpl
+*.brsar
+*.brstm
+*.dsy
+
+# .NET
+[Bb]in/
+[Oo]bj/
+**/TestResults/
+*.user
+*.suo
+
+# Native build leftovers
+*.o
+*.obj
+*.pdb
+*.ilk
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+
+# Editors, OS, logs
+/.vs/
+/.vscode/
+/.idea/
+__pycache__/
+*.log
+.DS_Store

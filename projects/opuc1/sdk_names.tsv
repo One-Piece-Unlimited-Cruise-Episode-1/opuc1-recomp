@@ -1,0 +1,237 @@
+# Manual RVL SDK names for tools/build-function-map.mjs (highest priority after thunk families).
+# ADDR<TAB>Name<TAB>evidence
+8026b300	OSInit	Ghidra 2026-11-22: called from __start 80004040+0x11C; sets __ArenaLo 0x806A29C0 (8026b410), ArenaHi 0x81700000 (8026b49c), calls OSExceptionInit 8026b884, __OSInitAlarm 8026bd5c
+80278f9c	__init_user	position in __start (80004194) before main
+80279004	exit	Dolphin signature + __start tail branch 800041a4
+803f03d8	main	ALSystem::Main called from __start 800041a0
+8026d978	OSInitContext	Ghidra 2026-11-22: srr0 +0x198, srr1 0x9032, r2/r13 save; called by OSCreateThread 80274ea8
+8026d954	OSClearContext	dsy candidate (with _restgpr_14); called with IdleContext by __OSThreadInit 80274908
+8026d8ec	OSGetStackPointer	dsy candidate; __OSThreadInit 80274760 uses its result as stack bound
+80288b08	AIRegisterDMACallback	audio worker: r13-0x5398 global; called by __AXOutInit 8028aee4
+80288bc8	AIStartDMA	sets 0xCC005036 bit15
+80288bdc	AIStopDMA	clears 0xCC005036 bit15; called by __AXOutQuit
+80288bf0	AIGetDMABytesLeft	lhz 0x503a
+80288c00	AIGetDMAStartAddr	0x5030/0x5032
+80288c18	AIGetDMALength	0x5036
+80288c28	AICheckInit	lwz -0x53d0(r13)
+80288db0	AIReset	stores 0 to __AI_init_flag
+80283034	VISetPreRetraceCallback	VI range, r13-0x5460; reboot path 8026ff58 calls (0) after VISetBlack
+80283078	VISetPostRetraceCallback	called right after 80283034 in 8026ff58 / 80328340
+8028f728	DSPCheckMailToDSP	0x5000 bit15
+8028f738	DSPCheckMailFromDSP	0x5004 bit15
+8028f748	DSPReadMailFromDSP	0x5004/0x5006
+8028f75c	DSPSendMailToDSP	sth 0x5000/0x5002
+8028f830	DSPCheckInit	lwz -0x5250(r13)
+8028f838	DSPAddTask	insert_task + boot_task
+8028f8a8	DSPCancelTask	flags|=2; called by __AXOutQuit with AX task
+8028f8e8	DSPAssertTask	curr-task compare, sets DSP interrupt bit
+8028a964	__AXOutNewFrame	mails 0xbabe0080 to DSP
+8028abc4	__AXOutAiCallback	registered via AIRegisterDMACallback by __AXOutInit
+8028ac74	__AXDSPInitCallback	task+0x28
+8028ac80	__AXDSPResumeCallback	task+0x2c
+8028acd4	__AXDSPDoneCallback	task+0x30
+8028ace4	__AXDSPRequestCallback	task+0x34, blr
+8028ace8	__AXOutInitDSP	fills task 805F7C20, DSPAddTask
+8028add8	__AXOutInit	__AXOutInitDSP, AIRegisterDMACallback, AIInitDMA, AIStartDMA
+8028afd0	__AXOutQuit	DSPCancelTask, AIRegisterDMACallback(0), AIStopDMA
+8028b038	AXRegisterCallback	r13-0x52e4, called each frame by __AXOutNewFrame
+8028ded0	AXFXReverbStdExpGetMemSize	size 0x60 = MKWii
+8028df30	AXFXReverbStdExpInit	size 0x17c = MKWii
+8028e0ac	AXFXReverbStdExpSettings	0xd0
+8028e17c	AXFXReverbStdExpSettingsUpdate	0xb4
+8028e230	AXFXReverbStdExpShutdown	MAP had wrong HiExp name
+8028e284	AXFXReverbStdExpCallback	0x36c; called by nw4r 80310e00
+80272ac0	__OSInitMemoryProtection	sth to MI 0xCC004020 at 80272aec; OSInit 8026b580 calls it
+802739d4	OSGetResetCode	lwz 0x3024(0xCC000000) at 802739f8, rlwinm >>3
+80290b40	__GXInitGX	GX worker 2026-11-22: called last by GXInit 80290b1c
+80291ca8	__GXIsGPFifoReady	GX worker 2026-11-22: returns r13-0x5207
+80291cb0	GXGetCPUFifo	GX worker 2026-11-22: copies CPUFifo 80609AE4
+80291d40	GXGetFifoCount	GX worker 2026-11-22: returns +0x1C
+80291d48	GXGetFifoWrap	GX worker 2026-11-22: returns +0x20
+80291d50	GXSetBreakPtCallback	GX worker 2026-11-22: swaps r13-0x51fc
+802925fc	GXClearVtxDesc	GX worker 2026-11-22: gd+0x14=0x200
+80292a14	GXSetArray	GX worker 2026-11-22: CP 0xA0/0xB0
+80292a54	GXInvalidateVtxCache	GX worker 2026-11-22: writes 0x48
+80292c8c	GXSetNumTexGens	GX worker 2026-11-22: genMode bits 0-3
+80292cb0	GXSetMisc	GX worker 2026-11-22: sets 0x5F9/0x5FA
+80292d98	GXResetWriteGatherPipe	GX worker 2026-11-22: PPCMtwpar
+802930e4	GXSetDrawDone	GX worker 2026-11-22: BP 0x45000002
+80293188	GXPixModeSync	GX worker 2026-11-22: gd+0x22C
+802931ac	GXPokeAlphaMode	GX worker 2026-11-22: peReg+6
+802931bc	GXPokeAlphaRead	GX worker 2026-11-22: peReg+8
+802931d4	GXPokeAlphaUpdate	GX worker 2026-11-22: peReg+2 bit4
+80293244	GXPokeColorUpdate	GX worker 2026-11-22: bit3
+80293258	GXPokeDstAlpha	GX worker 2026-11-22: peReg+4
+80293270	GXPokeDither	GX worker 2026-11-22: bit2
+80293284	GXPokeZMode	GX worker 2026-11-22: peReg+0
+802932a0	GXSetDrawSyncCallback	GX worker 2026-11-22: r13-0x51d8
+80293368	GXSetDrawDoneCallback	GX worker 2026-11-22: r13-0x51dc
+8029392c	GXSetLineWidth	GX worker 2026-11-22: gd+0x7C low
+80293960	GXSetPointSize	GX worker 2026-11-22: gd+0x7C bits 8-15
+80293994	GXEnableTexOffsets	GX worker 2026-11-22: gd+0x108
+802939d0	GXSetCullMode	GX worker 2026-11-22: genMode bits 14-15
+802939f8	GXSetCoPlanar	GX worker 2026-11-22: BP 0xFE080000
+80293a34	__GXSetGenMode	GX worker 2026-11-22: BP genMode
+80293a58	GXAdjustForOverscan	GX worker 2026-11-22: GXRenderModeObj copy/adjust
+80293b90	GXSetDispCopySrc	GX worker 2026-11-22: gd+0x230
+80293bd0	GXSetTexCopySrc	GX worker 2026-11-22: gd+0x240
+80293c10	GXSetDispCopyDst	GX worker 2026-11-22: gd+0x238
+80293d50	GXSetDispCopyFrame2Field	GX worker 2026-11-22: gd+0x23C
+80293d70	GXSetCopyClamp	GX worker 2026-11-22: gd+0x23C/0x24C
+802942f0	GXSetDispCopyGamma	GX worker 2026-11-22: gd+0x23C bits 7-8
+80294598	GXClearBoundingBox	GX worker 2026-11-22: BP 0x55/0x56
+80294708	GXInitSpecularDirHA	GX worker 2026-11-22: 6 floats
+802947bc	GXSetChanAmbColor	GX worker 2026-11-22: gd+0xA8
+8029496c	GXSetNumChans	GX worker 2026-11-22: genMode bits 4-6
+80294f84	GXInitTexObjTlut	GX worker 2026-11-22: +0x18
+80294f8c	GXInitTexObjFilter	GX worker 2026-11-22: min/mag bits
+80294fb4	GXInitTexObjUserData	GX worker 2026-11-22: +0x10
+80294fbc	GXGetTexObjUserData	GX worker 2026-11-22: +0x10
+80294fc4	GXGetTexObjWidth	GX worker 2026-11-22: +8
+80294fd8	GXGetTexObjHeight	GX worker 2026-11-22: +8>>10
+80294fec	GXGetTexObjFmt	GX worker 2026-11-22: +0x14
+80294ff4	GXGetTexObjWrapS	GX worker 2026-11-22: +0&3
+80295000	GXGetTexObjWrapT	GX worker 2026-11-22: +0>>2
+8029500c	GXGetTexObjMipMap	GX worker 2026-11-22: +0x1F
+80295018	GXGetTexObjTlut	GX worker 2026-11-22: +0x18
+802951d8	GXInitTlutObj	GX worker 2026-11-22: 0x64 BP
+80295348	GXInitTlutRegion	GX worker 2026-11-22: GXInit loop 80290a84
+802953b0	GXSetTexRegionCallback	GX worker 2026-11-22: gd+0x518
+802953c4	GXSetTlutRegionCallback	GX worker 2026-11-22: gd+0x51C
+80295d18	GXSetTevIndWarp	GX worker 2026-11-22: -> GXSetTevIndirect
+80295ebc	__GXUpdateBPMask	GX worker 2026-11-22: lone blr
+80295ec0	__GXSetIndirectMask	GX worker 2026-11-22: gd+0x174
+80295ef0	__GXFlushTextureState	GX worker 2026-11-22: BP gd+0x174
+80295fa8	GXSetTevColorIn	GX worker 2026-11-22: gd+0x180
+80295fe8	GXSetTevAlphaIn	GX worker 2026-11-22: gd+0x1C0
+80296028	GXSetTevColorOp	GX worker 2026-11-22: gd+0x180
+802961f8	GXSetTevKColorSel	GX worker 2026-11-22: gd+0x200
+80296570	GXSetNumTevStages	GX worker 2026-11-22: genMode bits 10-13
+80296934	GXSetColorUpdate	GX worker 2026-11-22: cmode0 bit3
+8029698c	GXSetZMode	GX worker 2026-11-22: gd+0x228
+80296a98	GXSetDither	GX worker 2026-11-22: cmode0 bit2
+80296af4	GXSetFieldMask	GX worker 2026-11-22: BP 0x44
+80296b98	GXBeginDisplayList	GX worker 2026-11-22: DLFifo 80609B08
+80296c4c	GXEndDisplayList	GX worker 2026-11-22: GetFifoWrap/Count
+80296f0c	GXSetCurrentMtx	GX worker 2026-11-22: gd+0x80
+80297070	GXSetViewportJitter	GX worker 2026-11-22: gd+0x544
+802970ac	GXSetViewport	GX worker 2026-11-22: gd+0x544
+802970d8	GXSetZScaleOffset	GX worker 2026-11-22: gd+0x55C
+80297170	GXSetScissorBoxOffset	GX worker 2026-11-22: BP 0x59
+802971ac	GXSetClipMode	GX worker 2026-11-22: XF 0x1005
+8027a570	DVDInit	DVD/NAND worker 2026-11-22
+80279a70	__DVDFSInit	DVD/NAND worker 2026-11-22
+8027d168	stateReady	DVD/NAND worker 2026-11-22
+8027e750	DVDResume	DVD/NAND worker 2026-11-22
+8027e7a0	DVDCancelAsync	DVD/NAND worker 2026-11-22
+8027eb04	DVDCancel	DVD/NAND worker 2026-11-22
+8027ebe8	DVDGetCurrentDiskID	DVD/NAND worker 2026-11-22
+8027ed04	__DVDPrepareResetAsync	DVD/NAND worker 2026-11-22
+8027ee2c	__DVDPrepareReset	DVD/NAND worker 2026-11-22
+8027ef8c	__DVDClearWaitingQueue	DVD/NAND worker 2026-11-22
+8027fe44	__DVDCheckDevice	DVD/NAND worker 2026-11-22
+80280fec	DVDLowClosePartition	DVD/NAND worker 2026-11-22
+802812e4	DVDLowStopMotor	DVD/NAND worker 2026-11-22
+80282520	DVDLowClearCoverInterrupt	DVD/NAND worker 2026-11-22
+802b5684	ISFS_OpenLib	DVD/NAND worker 2026-11-22
+802b6d60	IPCGetBufferHi	DVD/NAND worker 2026-11-22
+802b6d68	IPCGetBufferLo	DVD/NAND worker 2026-11-22
+802b8dd0	nandCreate	DVD/NAND worker 2026-11-22
+802b8fe0	NANDCreateAsync	DVD/NAND worker 2026-11-22
+802b9058	NANDPrivateCreateAsync	DVD/NAND worker 2026-11-22
+802b93b0	NANDRead	DVD/NAND worker 2026-11-22
+802b9418	NANDReadAsync	DVD/NAND worker 2026-11-22
+802b9490	NANDWrite	DVD/NAND worker 2026-11-22
+802b94f8	NANDWriteAsync	DVD/NAND worker 2026-11-22
+802b96c0	nandCreateDir	DVD/NAND worker 2026-11-22
+802b97ec	NANDCreateDirAsync	DVD/NAND worker 2026-11-22
+802b9864	NANDPrivateCreateDirAsync	DVD/NAND worker 2026-11-22
+802b98dc	NANDGetLength	DVD/NAND worker 2026-11-22
+802b9c0c	NANDGetStatus	DVD/NAND worker 2026-11-22
+802b9cd4	NANDGetStatusAsync	DVD/NAND worker 2026-11-22
+802b9d58	NANDPrivateGetStatusAsync	DVD/NAND worker 2026-11-22
+802b9f00	NANDOpen	DVD/NAND worker 2026-11-22
+802ba018	NANDOpenAsync	DVD/NAND worker 2026-11-22
+802ba090	NANDPrivateOpenAsync	DVD/NAND worker 2026-11-22
+802ba180	NANDClose	DVD/NAND worker 2026-11-22
+802ba1ec	NANDCloseAsync	DVD/NAND worker 2026-11-22
+802ba274	NANDPrivateSafeOpenAsync	DVD/NAND worker 2026-11-22
+802bb32c	nandIsInitialized	DVD/NAND worker 2026-11-22
+802bb610	NANDInit	DVD/NAND worker 2026-11-22
+802bbf4c	NANDPrivateGetTypeAsync	DVD/NAND worker 2026-11-22
+802bc1ac	NANDCheckAsync	DVD/NAND worker 2026-11-22
+802be3c0	SCGetAspectRatio	VI/OS worker 2026-11-22
+802be488	SCGetEuRgb60Mode	VI/OS worker 2026-11-22
+802be554	SCGetScreenSaverMode	VI/OS worker 2026-11-22
+802bdbb8	SCFindU8Item	VI/OS worker 2026-11-22
+802bdc8c	SCFindS8Item	VI/OS worker 2026-11-22
+802be9e0	SCGetProductGameRegion	VI/OS worker 2026-11-22
+802762c0	OSSetResetCallback	VI/OS worker 2026-11-22
+802763ac	OSSetPowerCallback	VI/OS worker 2026-11-22
+80276818	__OSDefaultResetCallback	VI/OS worker 2026-11-22
+8027681c	__OSDefaultPowerCallback	VI/OS worker 2026-11-22
+80276820	__OSStateEventHandler	VI/OS worker 2026-11-22
+80276298	__OSGetIPCBufferHi	VI/OS worker 2026-11-22
+802762a0	__OSGetIPCBufferLo	VI/OS worker 2026-11-22
+80282824	__VIRetraceHandler	VI/OS worker 2026-11-22
+80284c70	VIGetScanMode	VI/OS worker 2026-11-22
+8026ce54	DCInvalidateRange	VI/OS worker 2026-11-22
+8026d104	LCLoadData	VI/OS worker 2026-11-22
+8026d244	LCQueueWait	VI/OS worker 2026-11-22
+80278084	__OSInitPlayTime	VI/OS worker 2026-11-22
+8026d814	OSLoadContext	VI/OS worker 2026-11-22
+8026ce40	DCEnable	VI/OS worker 2026-11-22
+8026ce80	DCFlushRange	VI/OS worker 2026-11-22
+8026ceb0	DCStoreRange	VI/OS worker 2026-11-22
+8026cee0	DCFlushRangeNoSync	VI/OS worker 2026-11-22
+8026cf0c	DCZeroRange	VI/OS worker 2026-11-22
+8026cf38	ICInvalidateRange	VI/OS worker 2026-11-22
+8026cf6c	ICFlashInvalidate	VI/OS worker 2026-11-22
+8026cf7c	ICEnable	VI/OS worker 2026-11-22
+8026d05c	LCEnable	VI/OS worker 2026-11-22
+8026d094	LCDisable	VI/OS worker 2026-11-22
+8026d0bc	LCLoadBlocks	VI/OS worker 2026-11-22
+8026d0e0	LCStoreBlocks	VI/OS worker 2026-11-22
+8027493c	OSGetCurrentThread	VI/OS worker 2026-11-22
+8026ff58	OSFatal	VI/OS worker 2026-11-22
+802d4c30	GKI_delay	VI/OS worker 2026-11-22
+8026a9d4	OSGetConsoleType	VI/OS worker 2026-11-22
+80273a04	OSResetSystem	VI/OS worker 2026-11-22
+800042e0	__init_hardware	VI/OS worker 2026-11-22
+8026a5f8	PPCMfhid0	VI/OS worker 2026-11-22
+8026a600	PPCMthid0	VI/OS worker 2026-11-22
+8026a618	PPCMtdec	VI/OS worker 2026-11-22
+8026a620	PPCSync	VI/OS worker 2026-11-22
+8026a628	PPCHalt	VI/OS worker 2026-11-22
+8026a63c	PPCMtmmcr0	VI/OS worker 2026-11-22
+8026a644	PPCMtmmcr1	VI/OS worker 2026-11-22
+8026a64c	PPCMtpmc1	VI/OS worker 2026-11-22
+8026a654	PPCMtpmc2	VI/OS worker 2026-11-22
+8026a65c	PPCMtpmc3	VI/OS worker 2026-11-22
+8026a664	PPCMtpmc4	VI/OS worker 2026-11-22
+8026a6bc	PPCMthid2	VI/OS worker 2026-11-22
+8026a6c4	PPCMfwpar	VI/OS worker 2026-11-22
+8026a6d0	PPCMtwpar	VI/OS worker 2026-11-22
+8026a6d8	PPCDisableSpeculation	VI/OS worker 2026-11-22
+802719e4	OSDisableInterrupts	VI/OS worker 2026-11-22
+802719f8	OSEnableInterrupts	VI/OS worker 2026-11-22
+80271a0c	OSRestoreInterrupts	VI/OS worker 2026-11-22
+80271a30	__OSSetInterruptHandler	VI/OS worker 2026-11-22
+80271b18	SetInterruptMask	VI/OS worker 2026-11-22
+8026dd60	OSReport	VI/OS worker 2026-11-22
+80275ba4	OSSleepTicks	VI/OS worker 2026-11-22
+802751f8	OSCancelThread	VI/OS worker 2026-11-22
+802753d8	OSJoinThread	VI/OS worker 2026-11-22
+802757b0	OSSuspendThread	VI/OS worker 2026-11-22
+80275c4c	OSGetTime	VI/OS worker 2026-11-22
+802bcafc	SCCheckStatus	VI/OS worker 2026-11-22
+802833e4	VIInit	VI/OS worker 2026-11-22
+80283eac	VIConfigure	VI/OS worker 2026-11-22
+80284cd0	VIGetDTVStatus	VI/OS worker 2026-11-22
+80284adc	VIGetRetraceCount	VI/OS worker 2026-11-22
+804b7e24	ESP_InitLib	VI/OS worker 2026-11-22
+804b7e78	ESP_CloseLib	VI/OS worker 2026-11-22
+804b83ac	ESP_GetTitleId	VI/OS worker 2026-11-22
+804b8314	ESP_GetDataDir	VI/OS worker 2026-11-22
+80296080	GXSetTevAlphaOp	loop 2026-11-22: twin of GXSetTevColorOp 80296028 on gd+0x1C0
+8026a6b4	PPCMfhid2	loop 2026-11-22: mfspr r3,HID2; blr
