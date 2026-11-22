@@ -327,12 +327,12 @@ inline void EnsureConfigFile() {
               "# steam_input_app_id = 480\n\n"
               "[discord]\n"
               "# Rich Presence talks only to a locally-running Discord client.\n"
-              "# Retro Rewind supplies its official app ID automatically. Set this\n"
-              "# to a Discord application ID for basic base-game presence.\n"
+              "# Off until client_id is set: put a Discord application ID there\n"
+              "# to show basic presence for the game.\n"
               "enabled = true\n"
               "# client_id = \"123456789012345678\"\n\n"
               "[paths]\n"
-              "# dvd_root = \"D:\\\\MarioKartWii\\\\DATA\"\n"
+              "# dvd_root = \"D:\\\\OPUC1\\\\DATA\"\n"
               "# nand_root = \"D:\\\\WiiNand\"\n"
               "# retro_rewind_root = \"D:\\\\RetroRewind\\\\RetroRewind6\"\n"
               "# overlay_roots = [\"D:\\\\RetroRewind\"]\n";
@@ -1118,7 +1118,7 @@ inline bool DiscordPresenceEnabled(bool fallback = true) {
     return Get().discordPresenceEnabled.value_or(fallback);
 }
 
-inline std::string DiscordClientId(std::string fallback = "1543984562369990706") {
+inline std::string DiscordClientId(std::string fallback = "") {  // no default app: presence stays off until [discord] client_id is set
     return Get().discordClientId.value_or(std::move(fallback));
 }
 
