@@ -148,9 +148,6 @@ const uint32_t kViNextFrameBufferAddr   = MKW_GADDR(8068AA28 /*mkw:80386BA0*/);
 const uint32_t kViNextFrameBufferHwAddr = MKW_GADDR(805F3A00 /*mkw:80350890*/);
 const uint32_t kViRetraceQueueAddr      = MKW_GADDR(8068AA48 /*mkw:80386BC0*/); // Thread queue for VIWaitForRetrace
 
-// EGG::BaseSystem::sSystem pointer - must be non-null before post-retrace callback is valid
-const uint32_t kEggSSystemAddr = OPUC_TODO(MKW_GADDR, 80386F60);
-
 std::chrono::microseconds IntervalForFormat(uint32_t tvFormat) {
     // NTSC-ish defaults to 60 Hz; PAL uses 50 Hz.
     return tvFormat == 1 ? 20000us : 16666us;
@@ -341,12 +338,7 @@ void AdvanceRetrace(CpuContext* ctx, Clock::time_point retraceStamp, bool servic
             InvokeIndirectCpu(preCb, ctx);
         }
         if (postCb) {
-            // Guard: only invoke callback if sSystem is initialized
-            // The callback dereferences sSystem which must be non-null
-            uint32_t sSystemPtr = Memory::Read32(kEggSSystemAddr);
-            if (sSystemPtr != 0) {
-                InvokeIndirectCpu(postCb, ctx);
-            }
+            InvokeIndirectCpu(postCb, ctx);
         }
     }
 

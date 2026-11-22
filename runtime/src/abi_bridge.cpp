@@ -256,9 +256,6 @@ std::string ValidateGeneratedIndirectDispatchLocked() {
 }
 }
 
-uint32_t FilterScnRendererPathMaskOption(uint32_t pathMask) noexcept {
-    return RuntimeGameGraphicsOptions::FilterScnRendererPathMask(pathMask);
-}
 
 void ReportMissingIndirectJumpTarget(uint32_t target, CpuContext* cpu) {
     // If not registered, this is likely a switch table jump to an intra-function label.

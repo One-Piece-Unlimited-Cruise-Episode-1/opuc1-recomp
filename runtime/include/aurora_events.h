@@ -1,6 +1,5 @@
 #pragma once
 
-#include "friend_code_keyboard.h"
 #include "settings_overlay.h"
 #include "steam_input_layout.h"
 #include "runtime_config.h"
@@ -19,14 +18,10 @@
 #include <windows.h>
 #endif
 
-extern "C" bool g_dynamicAspectRatioEnabled;
+// Viewport policy for the window: stretch, or a forced 4:3 / 16:9 picture (dynamic_aspect.cpp).
 void ConfigureMkwDynamicAspect(bool widescreen, bool forceAspect, uint32_t surfaceWidth, uint32_t surfaceHeight);
 void SetMkwForceAspect(bool enabled);
 void UpdateMkwDynamicAspectSurface(uint32_t surfaceWidth, uint32_t surfaceHeight);
-// Arms the "keep EGG::Frustum's projection scale" flag on every screen that
-// renders to a fixed-size offscreen target. Cheap and idempotent; called from
-// the GX viewport path so it beats bakes that never cross a frame boundary.
-void AssertMkwOffscreenScreenBypass();
 inline std::atomic_bool g_mkwDynamicAspectSurfacePending{false};
 
 namespace WindowPlacementPersistence {
@@ -121,7 +116,6 @@ inline void ProcessAuroraEvents(const AuroraEvent* events) {
         g_mkwDynamicAspectSurfacePending.store(true, std::memory_order_release);
     }
     settings_overlay::HandleEvents(events);
-    FriendCodeKeyboard::HandleEvents(events);
     SteamInputLayout::HandleEvents(events);
 }
 

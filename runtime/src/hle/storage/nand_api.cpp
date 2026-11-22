@@ -200,13 +200,8 @@ extern "C" int32_t NANDOpen_HLE(uint32_t pathPtr, uint32_t fileInfoPtr, uint32_t
     }
 
     if (!file) {
-        if (IsFaceLibResourcePath(path) && SeedFaceLibResource(hostPath)) {
-            file = NandFopen(hostPath, fopenMode);
-        }
-        if (!file) {
-            LogNandError("NANDOpen", "FAILED to open guest '%s' mode %u (host %s)", path ? path : "(null)", mode, HostPathText(hostPath).c_str());
-            return NAND_RESULT_NOEXISTS;
-        }
+        LogNandError("NANDOpen", "FAILED to open guest '%s' mode %u (host %s)", path ? path : "(null)", mode, HostPathText(hostPath).c_str());
+        return NAND_RESULT_NOEXISTS;
     }
 
     int32_t fd = AllocateFd(hostPath, file, mode);

@@ -59,7 +59,6 @@
 
 #include "abi_bridge.h"
 #include "audio_backend.h"
-#include "boot_race.h"
 #include "guest_abi/guest_region.h"
 #include "guest_flat_memory.h"
 #include "gx_guest_write.h"
@@ -1356,15 +1355,15 @@ int RuntimeMain(int argc, char** argv) {
     
     std::string currentEntryLabel;
 
-    // `--headless`: with a boot race, run without a window, sound or dialogs.
+    // `--headless`: run without a window, sound or dialogs.
     g_headless = std::any_of(argv + 1, argv + argc,
                              [](const char* arg) { return std::string_view(arg) == "--headless"; });
 
     try {
         for (int i = 1; i < argc; ++i) {
-            if (std::string_view(argv[i]) != "--headless" && !BootRace::ParseArgument(argv[i])) {
+            if (std::string_view(argv[i]) != "--headless") {
                 throw std::invalid_argument(std::string("Unknown command-line option '") + argv[i] +
-                                            "'; the game runtime only accepts --race[=<course id>], --race-cpu and --headless, use Config.toml through the installed host.");
+                                            "'; the game runtime only accepts --headless, everything else goes through Config.toml.");
             }
         }
         // OPUC: --headless runs without window, sound or dialogs on its own (upstream required an MKWii boot race).
@@ -1491,9 +1490,6 @@ int RuntimeMain(int argc, char** argv) {
             SteamInputLayout::Initialize(RuntimeConfigFile::SteamInputOverrideEnabled(),
                                          RuntimeConfigFile::SteamInputAppId());
         }
-        if (BootRace::Requested()) {
-            aurora_set_skip_unready_pipelines(false);
-        }
         RT_LOG(RT_TAG_CONFIG) << "video.widescreen=" << (configWidescreen ? "true" : "false")
                   << " force_aspect=" << (forceAspect ? "true" : "false")
                   << " SCGetAspectRatio=" << (configWidescreen ? 1 : 0)
@@ -1584,4 +1580,3 @@ int RuntimeMain(int argc, char** argv) {
 int main(int argc, char** argv) {
     return RuntimeMain(argc, argv);
 }
-extern "C" bool g_dynamicAspectRatioEnabled = false;

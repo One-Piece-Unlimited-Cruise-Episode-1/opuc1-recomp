@@ -8,7 +8,6 @@
 #include "nand_guest_path.h"
 #include "host_file.h"
 #include "runtime_log.h"
-#include "u8_archive.h"
 
 // ============================================================================
 // Configuration
@@ -290,71 +289,6 @@ std::filesystem::path TranslateNandPath(const char* wiiPath) {
     }
 
     return BuildHostNandPath(wiiPathStr);
-}
-
-// ============================================================================
-// U8 archive helper (used to seed FaceLib resources from the ISO)
-// ============================================================================
-
-static bool ExtractFromU8(const std::filesystem::path& archivePath, const char* targetName,
-                          std::vector<uint8_t>& outData) {
-    std::ifstream file(archivePath, std::ios::binary);
-    if (!file) {
-        return false;
-    }
-
-    file.seekg(0, std::ios::end);
-    const std::streamsize size = file.tellg();
-    if (size < 0x20 || static_cast<uint64_t>(size) > std::vector<uint8_t>{}.max_size()) {
-        return false;
-    }
-    file.seekg(0, std::ios::beg);
-
-    std::vector<uint8_t> data(static_cast<size_t>(size));
-    if (!file.read(reinterpret_cast<char*>(data.data()), size)) {
-        return false;
-    }
-
-    return RuntimeU8::Extract(data, targetName, outData);
-}
-
-// The only FaceLib resource the game ever seeds; every call site used to pass it
-// as an argument and the path predicate below hard-codes the same name.
-static constexpr char kFaceLibResourceName[] = "RFL_Res.dat";
-
-bool SeedFaceLibResource(const std::filesystem::path& hostPath) {
-    std::vector<uint8_t> payload;
-    if (const auto dvdRoot = RuntimeConfigFile::ResolvedDvdRoot(); !dvdRoot.empty()) {
-        const auto arcPath = dvdRoot / "files" / "contents" / "RFLRes01.arc";
-        std::error_code ec;
-        if (std::filesystem::exists(arcPath, ec)) {
-            ExtractFromU8(arcPath, kFaceLibResourceName, payload);
-        }
-    }
-
-    if (payload.empty()) {
-        LogNandError("FaceLibSeed", "Failed to locate %s in RFLRes01.arc", kFaceLibResourceName);
-        return false;
-    }
-
-    CreateParentDirectories(hostPath);
-
-    std::ofstream out(hostPath, std::ios::binary);
-    if (!out) {
-        LogNandError("FaceLibSeed", "Failed to create %s", HostPathText(hostPath).c_str());
-        return false;
-    }
-    out.write(reinterpret_cast<const char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
-    if (!out) {
-        LogNandError("FaceLibSeed", "Failed to write %s", HostPathText(hostPath).c_str());
-        return false;
-    }
-
-    return true;
-}
-
-bool IsFaceLibResourcePath(const char* path) {
-    return std::strcmp(path, "/shared2/menu/FaceLib/RFL_Res.dat") == 0;
 }
 
 std::optional<int32_t> NandCheckSystemSaveRead(const char* who,

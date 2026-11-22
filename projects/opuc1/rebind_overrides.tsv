@@ -331,9 +331,3 @@
 8016799C	804B83AC	VI/OS worker 2026-11-22: ESP_GetTitleId
 80167904	804B8314	VI/OS worker 2026-11-22: ESP_GetDataDir
 8055531C	unbound	VI/OS worker 2026-11-22: MKWii game code (RelProlog)
-805529A8	unbound	VI/OS worker 2026-11-22: MKWii game code (THP)
-80552A74	unbound	VI/OS worker 2026-11-22: MKWii game code (THP)
-8024373C	unbound	VI/OS worker 2026-11-22: MKWii game code (EGG::Thread)
-80386F60	unbound	VI/OS worker 2026-11-22: MKWii game code (EGG system)
-80386298	unbound	VI/OS worker 2026-11-22: MKWii game code (RFL manager)
-800BD860	unbound	VI/OS worker 2026-11-22: MKWii game code (RFLiIsWorking)

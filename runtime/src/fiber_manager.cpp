@@ -710,39 +710,12 @@ void GuestFiberManager::FiberProc(void* param)
     CpuContextScope scope(cpu);
     OS__RestoreInterrupts_801a65d4((cpu->srr1 & 0x8000u) != 0 ? 1 : 0);
     PurgePendingFibers();
-    
-    int startDeferAttempts = 0;
-    while (entryPoint == OPUC_TODO(MKW_GADDR, 8024373C)) { // EGG::Thread::start
-        uint32_t vtable = 0;
-        uint32_t startFn = 0;
-        try {
-            vtable = Memory::Read32(entryArg);
-            if (vtable >= 0x80000000u) {
-                startFn = Memory::Read32(vtable + 0x0Cu);
-            }
-        } catch (const Memory::AccessViolation&) {
-            vtable = 0;
-            startFn = 0;
-        }
 
-
-        if (vtable >= 0x80000000u && startFn >= 0x80000000u) {
-            break;
-        }
-
-        if (startDeferAttempts++ > 50) {
-            RT_LOG(RT_TAG_OS) << "EGG::Thread::start target still invalid (vtable=0x" << std::hex << vtable
-                      << ", fn=0x" << startFn << ") after retries; continuing anyway." << std::dec << std::endl;
-            break;
-        }
-        SwitchToScheduler();
-    }
-
+    // RestoreInterrupts may leave its result in r3; hand the entry its argument again.
     cpu->gpr[3] = entryArg;
     cpu->pc = entryPoint;
     cpu->srr0 = entryPoint;
 
-    
     // Call the translated thread entry function
     const auto* info = TranslatedFunctionRegistry::FindByAddressPtr(entryPoint);
     if (info) {

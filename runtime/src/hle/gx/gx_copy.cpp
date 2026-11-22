@@ -167,7 +167,6 @@ extern "C" void GX__CopyDisp_8016fc38(uint32_t da, uint32_t c) {
     OPUC_MILESTONE("frame");
     OpucCountCopyDisp();
     // OPUC draws its own strap/health screen (startlogo/*.aar); lift the runtime startup cover at the first copy.
-    // Upstream lifted it from MKWii's strap-scene hook (hle/strap_scene.cpp), which OPUC never calls.
     settings_overlay::NotifyStrapInputAccepted();
     EnsureAuroraFrameActive();
     if (GxWorker::ShouldDefer()) {

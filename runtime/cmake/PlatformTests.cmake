@@ -123,10 +123,6 @@ if(MKW_PLATFORM_WINDOWS)
     add_test(NAME mkw_host_file_recovery_tests COMMAND mkw_host_file_recovery_tests)
 endif()
 
-add_executable(mkw_u8_archive_tests "${MKW_TEST_RUNTIME_DIR}/tests/u8_archive_tests.cpp")
-target_include_directories(mkw_u8_archive_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")
-target_compile_features(mkw_u8_archive_tests PRIVATE cxx_std_17)
-add_test(NAME mkw_u8_archive_tests COMMAND mkw_u8_archive_tests)
 
 add_executable(mkw_runtime_config_io_tests "${MKW_TEST_RUNTIME_DIR}/tests/runtime_config_io_tests.cpp")
 target_include_directories(mkw_runtime_config_io_tests PRIVATE

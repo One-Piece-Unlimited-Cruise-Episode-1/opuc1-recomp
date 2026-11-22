@@ -435,39 +435,3 @@ extern "C" void OS__SetPeriodicAlarm_801a08e0(CpuContext* ctx)
 // Register the function
 PPC_NATIVE_OVERRIDE_VOID(8026C084 /*mkw:801A08E0*/, OS__SetPeriodicAlarm_801a08e0, (CpuContext* ctx), (ctx));
 
-// RFLiIsWorking (RFL, the Mii library) lives here because its whole job is to
-// pump this file's alarm queue: RFLInitRes spins on it waiting for async RFL
-// work that only completes when the interrupt-driven alarmCheckCb_ fires.
-// Original at 0x800BD860 reads the "working" flag at RFL manager + 0x1B34,
-// returning 0 when the manager pointer (0x80386298) is null.
-extern "C" uint32_t RFLiIsWorking_HLE_800bd860()
-{
-    // Alarm callbacks interrupt the caller; keep their register writes private.
-    GuestInterruptCallbackContext interrupt;
-    CpuContext* cpu = interrupt.get();
-    EnsureSda1Base(cpu);
-    IncrementSchedulerDisableCount();
-    try {
-        ProcessAlarmQueue(cpu, 32);
-    } catch (...) {
-        DecrementSchedulerDisableCount();
-        throw;
-    }
-    DecrementSchedulerDisableCount();
-
-    // Now return the actual "working" status
-    const uint32_t kRflManagerPtrAddr = OPUC_TODO(MKW_GADDR, 80386298);
-    constexpr uint32_t kWorkingFlagOffset = 0x1b34u;
-
-    try {
-        const uint32_t managerBase = ::Memory::Read32(kRflManagerPtrAddr);
-        if (managerBase == 0) {
-            return 0;
-        }
-        return ::Memory::Read32(managerBase + kWorkingFlagOffset);
-    } catch (const ::Memory::AccessViolation& e) {
-        LogMemoryError(RT_TAG_OS, "RFLiIsWorking", e);
-        return 0;
-    }
-}
-OPUC_UNBOUND(PPC_NATIVE_OVERRIDE, 800BD860, RFLiIsWorking_HLE_800bd860, uint32_t, (), ());

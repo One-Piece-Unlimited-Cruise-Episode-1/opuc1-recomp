@@ -320,9 +320,6 @@ extern "C" int32_t NANDSafeOpen_HLE(uint32_t pathPtr, uint32_t fileInfoPtr, uint
         if (const auto result = NandCheckSystemSaveRead("NANDSafeOpen", hostPath, mode))
             return *result;
         FILE* file = NandFopen(hostPath, "rb");
-        if (!file && IsFaceLibResourcePath(path) && SeedFaceLibResource(hostPath)) {
-            file = NandFopen(hostPath, "rb");
-        }
         if (!file) {
             LogNandError("NANDSafeOpen", "FAILED to open '%s' for reading",
                     HostPathText(hostPath).c_str());

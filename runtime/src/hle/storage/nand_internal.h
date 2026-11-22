@@ -1,4 +1,4 @@
-// Shared NAND/ISFS HLE internals, split across nand_fs.cpp (config, logging, fds, paths, FaceLib),
+// Shared NAND/ISFS HLE internals, split across nand_fs.cpp (config, logging, fds, paths),
 // nand_isfs.cpp (IOS_*/ISFS layer), nand_api.cpp (sync NAND* library), and nand_async.cpp (async
 // wrappers, NANDSafeOpen/Close). Anything more than one of those needs is declared here, defined once.
 
@@ -116,8 +116,6 @@ FILE* NandFopen(const std::filesystem::path& path, const char* mode);
 bool NandRemove(const std::filesystem::path& path);
 bool NandRename(const std::filesystem::path& from, const std::filesystem::path& to);
 
-bool SeedFaceLibResource(const std::filesystem::path& hostPath);
-bool IsFaceLibResourcePath(const char* path);
 
 // ============================================================================
 // stdio helpers shared by the NAND* library and the IOS_* device layer

@@ -6,7 +6,6 @@
 #include "controller_mapping_wizard.h"
 #include "input_bindings.h"
 #include "motion_trick.h"
-#include "game_graphics_options.h"
 #include "music_attenuation.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
@@ -119,7 +118,6 @@ bool g_widescreen = RuntimeConfigFile::WidescreenEnabled(true);
 #if defined(__APPLE__)
 bool g_metalFxSpatialUpscaling = RuntimeConfigFile::MetalFxSpatialUpscaling(false);
 #endif
-uint32_t g_disabledPostProcessingPaths = RuntimeConfigFile::DisabledPostProcessingPaths(0);
 std::array<int32_t, PAD_MAX_CONTROLLERS> g_configuredControllerIndices = [] {
     std::array<int32_t, PAD_MAX_CONTROLLERS> indices{};
     indices.fill(std::numeric_limits<int32_t>::min());
@@ -1168,28 +1166,6 @@ void DrawGraphicsSettings() {
     }
     ImGui::TextDisabled("Keep the current aspect ratio with black bars when the window has another shape.");
     ImGui::Separator();
-    struct EffectFlag {
-        const char* label;
-        uint32_t flag;
-    };
-    static constexpr std::array<EffectFlag, 1> kEffectFlags = {{
-        {"Disable bloom", 0x10u},
-    }};
-
-    for (const auto& effect : kEffectFlags) {
-        bool disabled = (g_disabledPostProcessingPaths & effect.flag) != 0;
-        if (ImGui::Checkbox(effect.label, &disabled)) {
-            if (disabled) {
-                g_disabledPostProcessingPaths |= effect.flag;
-            } else {
-                g_disabledPostProcessingPaths &= ~effect.flag;
-            }
-            RuntimeGameGraphicsOptions::SetDisabledPostProcessingPaths(g_disabledPostProcessingPaths);
-            RuntimeConfigFile::SetDisabledPostProcessingPaths(g_disabledPostProcessingPaths);
-        }
-    }
-    ImGui::TextDisabled("Applied when the next scene renderer is created.");
-    ImGui::Separator();
     static constexpr const char* kDisplayModes[] = {
         "Windowed",
         "Borderless fullscreen",
@@ -1631,7 +1607,6 @@ void InitializeRuntimeSettings() noexcept {
     MusicAttenuation::SetUiVolume(static_cast<float>(g_uiVolumePercent) / 100.0f);
     MusicAttenuation::SetVoicesVolume(static_cast<float>(g_voicesVolumePercent) / 100.0f);
     MusicAttenuation::SetEnabled(g_attenuateMusicWhenMediaPlays);
-    RuntimeGameGraphicsOptions::SetDisabledPostProcessingPaths(g_disabledPostProcessingPaths);
 #if defined(__APPLE__)
     aurora_set_metalfx_spatial(g_metalFxSpatialUpscaling);
 #endif

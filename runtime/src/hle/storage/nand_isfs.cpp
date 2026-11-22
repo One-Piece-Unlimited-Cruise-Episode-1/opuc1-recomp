@@ -479,12 +479,6 @@ static int32_t NAND_IOS_Open_Impl(uint32_t pathPtr, uint32_t mode) {
     if (const auto result = NandCheckSystemSaveRead("IOS_Open", hostPath, mode, true))
         return *result;
     
-    // Seed FaceLib resources before the existence check so every open mode can
-    // still find them on a fresh managed NAND.
-    if (!PathExists(hostPath) && IsFaceLibResourcePath(path)) {
-        SeedFaceLibResource(hostPath);
-    }
-
     // Determine file mode. IOS never creates files on open - creation happens
     // exclusively through ISFS CreateFile (which we implement). The previous
     // create-on-open fallback ("w+b") silently materialized 0-byte files (for

@@ -71,11 +71,6 @@ int32_t ComputeThreadEffectivePriority(uint32_t threadPtr)
     return priority;
 }
 
-bool IsThpVideoDecoderEntry(uint32_t entryFunc)
-{
-    return entryFunc == OPUC_TODO(MKW_GADDR, 805529A8) || entryFunc == OPUC_TODO(MKW_GADDR, 80552A74);
-}
-
 void InsertThreadIntoQueueByPriority(uint32_t queuePtr, uint32_t threadPtr, int32_t priority)
 {
     ::Memory::Write32(threadPtr + kThreadQueueOffset, queuePtr);
@@ -306,17 +301,6 @@ extern "C" void OSCreateThread_HLE_801a9e84(CpuContext* ctx)
             cpu->gpr[4] = entryFunc;
             cpu->gpr[5] = alignedStack - 8;
             InvokeIndirectCpu(MKW_GADDR(8026D978 /*mkw:801A20BC*/), cpu); // OSInitContext
-        }
-
-        if (IsThpVideoDecoderEntry(entryFunc)) {
-            // Decoder threads restore their own context via OSLoadContext, so the saved
-            // context needs these GQR2-GQR5 values or paired-single THP decode breaks
-            // under the all-zero OSInitContext defaults.
-            ::Memory::Write32(threadPtr + 0x1ACu, 0x00040004u);
-            ::Memory::Write32(threadPtr + 0x1B0u, 0x00050005u);
-            ::Memory::Write32(threadPtr + 0x1B4u, 0x00060006u);
-            ::Memory::Write32(threadPtr + 0x1B8u, 0x00070007u);
-
         }
 
         ::Memory::Write32(threadPtr + 0x84u, MKW_GADDR(80275114 /*mkw:801AA0F0*/)); // LR = OSExitThread

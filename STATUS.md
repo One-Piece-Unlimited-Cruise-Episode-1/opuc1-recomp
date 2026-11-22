@@ -141,6 +141,19 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   adventure state 3 showed the game opening only `/dev/net/kd/request` (ioctl 0x01, NWC24 scheduler suspend) and
   `/dev/net/kd/time` (ioctl 0x17, set RTC counter); `hle/wc24/kd_offline.cpp` answers those locally and every other
   `/dev/net` path fails like a missing device.
+- Mario Kart-only HLE removed (2026-11-22): `boot_race` and the `--race` / `--race-cpu` options (only `--headless` is
+  accepted now), `egg_decomp`, `gx_egg`, `task_thread`, `strap_scene`, the TRK stub, `friend_code_keyboard`, the EGG::Screen
+  half of `dynamic_aspect.cpp` (the viewport policy / force_aspect stays), the EGG::Thread start deferral, the THP decoder
+  GQR seeding for Mario Kart's decoder threads, the EGG `sSystem` guard on the VI post-retrace callback (the callback is
+  now called directly, as the SDK does), the ScnRenderer bloom hook (`ApplyRuntimeCallOptions`, the overlay's "Disable
+  bloom" option and `[video] disabled_post_processing_paths`), the Mii library pump (`RFLiIsWorking`) and the
+  `RFL_Res.dat` FaceLib seeding with its U8 reader. OPUC links neither EGG nor RFL (vault `entities/main-dol-layout`).
+  Every removed hook was `OPUC_UNBOUND` or keyed to an `OPUC_TODO` address, so translation output did not change.
+  Unbound generic SDK accessors (SC Bluetooth/WPAD items, SC product/serial, the nw4r::lyt quad path) stay until a
+  Ghidra check rebinds or rules them out.
+- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 22 of 24 pass. `mkw_system_bridge_tests`
+  ("a constructor failure skipped later constructors") and `mkw_fiber_manager_tests` (uncaught `Memory::AccessViolation:
+  test memory bounds`) already fail at 25cd2c7; they are inherited and not looked into yet. CI does not run ctest.
 
 - Basis: WiiCompiled (translator and runtime, GPL-3.0, with its aurora fork, MIT). See `docs/reference-study.md`.
   That name appears only where the basis is credited: README.md (Credits), docs/reference-study.md, the UPSTREAM.txt

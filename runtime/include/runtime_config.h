@@ -54,7 +54,6 @@ struct RuntimeUserConfig {
     std::optional<bool> textureReplacements;
     std::optional<bool> textureDumps;
     std::optional<bool> showFps;
-    std::optional<uint32_t> disabledPostProcessingPaths;
     std::optional<float> audioVolume;
     std::optional<float> audioMusicVolume;
     std::optional<float> audioSoundEffectsVolume;
@@ -489,10 +488,6 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.showFps = FindConfigValue<bool>(document, "video", "show_fps");
     config.textureReplacements = FindConfigValue<bool>(document, "video", "texture_replacements");
     config.textureDumps = FindConfigValue<bool>(document, "video", "texture_dumps");
-    if (auto value = FindConfigUint(document, "video", "disabled_post_processing_paths");
-        value && (*value & ~0x10u) == 0) {
-        config.disabledPostProcessingPaths = *value & 0x10u;
-    }
 
     auto readVolume = [&](std::string_view key) -> std::optional<float> {
         auto value = FindConfigFloat(document, "audio", key);
@@ -716,13 +711,6 @@ inline bool SetDisableCopyFilter(bool value) {
 inline bool SetShowFps(bool value) {
     Mutable().showFps = value;
     return WriteSetting("video", "show_fps", value ? "true" : "false");
-}
-
-inline bool SetDisabledPostProcessingPaths(uint32_t value) {
-    Mutable().disabledPostProcessingPaths = value;
-    std::ostringstream formatted;
-    formatted << "0x" << std::hex << std::uppercase << value;
-    return WriteSetting("video", "disabled_post_processing_paths", formatted.str());
 }
 
 inline bool SetControllerButton(size_t index, std::string value) {
@@ -1057,10 +1045,6 @@ inline bool TextureReplacements(bool fallback = false) {
 // gates it on TextureReplacements() as well.
 inline bool TextureDumps(bool fallback = false) {
     return Get().textureDumps.value_or(fallback);
-}
-
-inline uint32_t DisabledPostProcessingPaths(uint32_t fallback = 0) {
-    return Get().disabledPostProcessingPaths.value_or(fallback) & 0x10u;
 }
 
 inline std::string GraphicsApi(std::string fallback = "auto") {
