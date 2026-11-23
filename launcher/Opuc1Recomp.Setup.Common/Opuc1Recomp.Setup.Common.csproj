@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Opuc1Recomp.Setup.Common</RootNamespace>
+    <AssemblyName>Opuc1Recomp.Setup.Common</AssemblyName>
+    <Authors>One Piece: Unlimited Recompilation Episode 1 contributors</Authors>
+    <Product>One Piece: Unlimited Recompilation Episode 1</Product>
+    <Description>Shared logic (disc tool, runtime configuration, icon, SYSCONF, progress) used by the Windows and Linux/macOS setup hosts</Description>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" Version="2.10.1" />
+  </ItemGroup>
+</Project>

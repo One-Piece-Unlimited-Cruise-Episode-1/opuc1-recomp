@@ -29,8 +29,9 @@ if ($running) { Write-Error "$exeName is already running (pid $($running.Id -joi
 $userData = Join-Path $native 'UserData'
 New-Item -ItemType Directory -Force $userData, (Join-Path $userData 'nand') | Out-Null
 Set-Content -Encoding ascii (Join-Path $native 'portable.txt') 'One Piece: Unlimited Recompilation Episode 1 portable root (tools/run.ps1)'
-# OPUC's SC library runs translated and reads /shared2/sys/SYSCONF during OSInit (SCInit 802bca5c); without it
-# the SDK stops with "ERROR #002". Seed it from OPUC_SYSCONF or the local Dolphin NAND until the runtime can
+# OPUC's SC library runs translated and reads /shared2/sys/SYSCONF during OSInit (SCInit 802bca5c). Boot also works
+# without it (SCCheckStatus is HLE'd; checked 2026-11-23). Seed it from OPUC_SYSCONF or the local
+# Dolphin NAND until the runtime can
 # generate one (STATUS.md).
 $sysconf = Join-Path $userData 'nand/shared2/sys/SYSCONF'
 if (-not (Test-Path $sysconf)) {
@@ -39,7 +40,7 @@ if (-not (Test-Path $sysconf)) {
         New-Item -ItemType Directory -Force (Split-Path $sysconf) | Out-Null
         Copy-Item $seed $sysconf
         Write-Host "[opuc-run] seeded NAND SYSCONF from $seed"
-    } else { Write-Warning "no SYSCONF to seed (set OPUC_SYSCONF); the game will stop with ERROR #002" }
+    } else { Write-Warning "no SYSCONF to seed (set OPUC_SYSCONF); boot continues without one" }
 }
 $dvd = (Join-Path $data 'extract/DATA') -replace '\\', '/'
 $nand = (Join-Path $userData 'nand') -replace '\\', '/'

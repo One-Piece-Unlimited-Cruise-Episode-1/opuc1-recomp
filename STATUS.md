@@ -103,8 +103,10 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
 - Upstream HLE bugs fixed for OPUC: __GXPEInit / GXFinishInterruptHandler wrote GXData+0xA (cpEnable) instead of
   the PE MMIO register; VI IsInitialized / dimming flags are 32-bit in OPUC (upstream wrote 8-bit); SC game-region
   table has 5 entries (upstream assumed 4); NAND title id high is 0x00010000 (upstream 0x00010004).
-- Boot needs: IOS53 in low memory 0x80003140/0x80003188 (`system_bridge.cpp`), maker `AF`, and a NAND SYSCONF
-  (`run.ps1` seeds it from the local Dolphin NAND or `OPUC_SYSCONF`; generating one in the runtime is open work).
+- Boot needs: IOS53 in low memory 0x80003140/0x80003188 (`system_bridge.cpp`) and maker `AF`. A NAND SYSCONF is optional
+  (checked 2026-11-23): without it `NANDOpen /shared2/sys/SYSCONF` fails and boot still reaches the save check, because
+  `SCCheckStatus` is HLE'd to return success (`runtime/src/hle/sc.cpp`). `run.ps1` and the setup (`launcher/`) seed one
+  from the local Dolphin NAND or `OPUC_SYSCONF` / `--sysconf` when available.
 - Function starts: Ghidra's list + 3,273 data-pointer seeds (vtables, callback tables; fixpoint over owners) +
   305 code-constant seeds (`lis`/`addi` pairs). `bctr`, `blr`, tail-call `b` and prologues mark entries.
 - Engine coroutines: the context switch `803dfc94` is native (`hle/opuc/coroutine.cpp`); each coroutine is a host
@@ -193,7 +195,7 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
 
 - Basis: WiiCompiled (translator and runtime, GPL-3.0, with its aurora fork, MIT). See `docs/reference-study.md`.
   That name appears only where the basis is credited: README.md (Credits), docs/reference-study.md, the UPSTREAM.txt
-  files, translator/README.md, projects/mkwii-reference/README.md and THIRD-PARTY-NOTICES.md. Nothing else names it. The official name is **One Piece: Unlimited Recompilation Episode 1** (2026-11-22): window
+  files, translator/README.md, launcher/README.md (Credits), projects/mkwii-reference/README.md and THIRD-PARTY-NOTICES.md. Nothing else names it. The official name is **One Piece: Unlimited Recompilation Episode 1** (2026-11-22): window
   title, overlay startup / about screens, dialogs, log line, config header, CMake messages, READMEs. The user data folder
   (non-portable mode) is `One Piece Unlimited Recompilation Episode 1` (no colon: not allowed in Windows paths). Technical
   identifiers stay short: exe `opuc1-recomp.exe`, CMake target `opuc1_recomp`, internal id strings (`opuc1-recomp-*`,

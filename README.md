@@ -75,6 +75,19 @@ boot (scheduler suspend, RTC counter) are answered on the spot.
 > Nobody here will tell you where to get the game. Dumping your own disc is on you, and links to game files won't be
 > provided or tolerated.
 
+## Installing with the setup
+
+The setup in [`launcher/`](launcher/README.md) is the player-facing way in: one file per platform
+(`opuc1-recomp-setup.exe`, an AppImage, a macOS .pkg) that carries the translator and a portable compiler toolchain
+but no game code. Run it, pick your PAL `ROUPAF` disc image, and it checks the image, extracts it, translates and
+compiles the game on your machine (a one-time wait), installs it with shortcuts, and starts it. If you have a Wii
+`SYSCONF` (system settings) in a Dolphin user folder, setup copies it into the game's NAND; without one the game still
+starts. Started again (or from the shortcut) it
+launches the game, and a newer setup updates the installation in place.
+
+Build the Windows setup with `powershell -ExecutionPolicy Bypass -File launcher/Build-Installer.ps1`; see
+[`launcher/README.md`](launcher/README.md) for the command line and the other platforms.
+
 ## Building from source
 
 Owning the game is still required even if you compile everything yourself.
@@ -85,7 +98,8 @@ You'll need: .NET 10 SDK, Node.js 20+, CMake 3.25+, Ninja and LLVM-MinGW clang
 1. Extract your disc into `data/extract/DATA` at the repository root (for example with
    `wit extract <your image> data/extract`). `data/` is ignored by git; it can be a folder or a directory link.
 2. Copy a Wii `SYSCONF` from a Dolphin user folder (`Wii/shared2/sys/SYSCONF`) and point `OPUC_SYSCONF` at it, or place
-   it at `data/dolphin-user/Wii/shared2/sys/SYSCONF`. The game stops with `ERROR #002` without one.
+   it at `data/dolphin-user/Wii/shared2/sys/SYSCONF`. Optional: without one the SC library's NANDOpen fails and the game
+   still boots (the runtime answers SCCheckStatus itself).
 3. Translate and compile:
 
 ```powershell
@@ -124,7 +138,8 @@ dotnet test translator/Translator.sln -c Release
 | `projects/opuc1/rebind_overrides.tsv` | manual SDK address overrides (`MKWADDR<TAB>OPUCADDR\|unbound<TAB>note`) |
 | `projects/opuc1/rebind_report.md` | generated: mapped / unbound / TODO runtime addresses |
 | `projects/mkwii-reference/MAP.txt` | reference SDK symbol map, used only to rebind the runtime's SDK addresses |
-| `tools/` | build, run, map, rebind and status scripts |
+| `tools/` | build, run, map, rebind and status scripts (developer checkout) |
+| `launcher/` | the player setup and launcher: disc check, local build with a bundled toolchain, install, launch |
 | `docs/` | design notes ([reference-study.md](docs/reference-study.md)) |
 | `generated/`, `build/` | outputs, never committed: they contain translated game code |
 
@@ -156,8 +171,8 @@ running in Dolphin.
 
 ## Credits
 
-- **[WiiCompiled](https://github.com/patchzyy/wiicompiled)** - the basis of this project: its translator, runtime and
-  aurora fork were taken as the starting point and adjusted for this game. GPL-3.0.
+- **[WiiCompiled](https://github.com/patchzyy/wiicompiled)** - the basis of this project: its translator, runtime,
+  aurora fork and setup (`launcher/`) were taken as the starting point and adjusted for this game. GPL-3.0.
 - **[aurora](https://github.com/encounter/aurora)** - the GX rendering / windowing backend. MIT.
 - **[Dawn](https://dawn.googlesource.com/dawn)** - Google's WebGPU implementation behind aurora's Direct3D, Vulkan and
   OpenGL backends.

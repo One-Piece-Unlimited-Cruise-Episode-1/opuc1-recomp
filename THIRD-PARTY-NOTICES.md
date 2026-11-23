@@ -114,6 +114,24 @@ redistributes the resulting binaries.
 | C++/WinRT | - | MIT (Microsoft) | <https://github.com/microsoft/cppwinrt> |
 | nodtool (disc image extraction) | v2.0.0-alpha.10 | MIT OR Apache-2.0 | <https://github.com/encounter/nod> |
 
+### Bundled in the setup installers (`launcher/`)
+
+The setup payload ships a portable build toolchain so a player's machine can compile the game. Pinned in
+`launcher/Prepare-PortableTools.ps1` (Windows), `launcher/prepare-portable-tools.sh` (Linux) and the
+`launcher/macos/` packaging scripts; each download is checked against a SHA-256.
+
+| Component | License | Upstream |
+| --- | --- | --- |
+| LLVM-MinGW (Clang/LLD, mingw-w64 runtime) | Apache-2.0 WITH LLVM-exception; mingw-w64 under ZPL / public domain / MIT-style | <https://github.com/mstorsjo/llvm-mingw> |
+| CMake | BSD-3-Clause | <https://cmake.org/> |
+| Ninja | Apache-2.0 | <https://github.com/ninja-build/ninja> |
+| .NET runtime (self-contained setup host and translator) | MIT | <https://github.com/dotnet/runtime> |
+| Tomlyn | BSD-2-Clause | <https://github.com/xoofx/Tomlyn> |
+| Microsoft Visual C++ runtime (Windows, app-local) | Microsoft redistributable terms | <https://visualstudio.microsoft.com/license-terms/> |
+
+The setup itself is based on the WiiCompiled `Launcher/` (GPL-3.0); the license texts above are copied into
+`licenses\` of every installation.
+
 ### Dual-licensed components - elections made by this project
 
 - **FreeType** is offered under the FreeType License (FTL) or GPL-2.0. **This project elects the

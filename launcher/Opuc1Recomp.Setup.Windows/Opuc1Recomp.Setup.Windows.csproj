@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>opuc1-recomp-setup</AssemblyName>
+    <RootNamespace>Opuc1Recomp.Setup.Windows</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Authors>One Piece: Unlimited Recompilation Episode 1 contributors</Authors>
+    <Product>One Piece: Unlimited Recompilation Episode 1</Product>
+    <Description>Setup and launcher for One Piece: Unlimited Recompilation Episode 1</Description>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Opuc1Recomp.Setup.Common\Opuc1Recomp.Setup.Common.csproj" />
+    <Using Include="Opuc1Recomp.Setup.Common" />
+  </ItemGroup>
+</Project>
