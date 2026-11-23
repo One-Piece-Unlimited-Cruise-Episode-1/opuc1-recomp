@@ -28,9 +28,9 @@ int main() {
 #else
         const fs::path root = "/home/player/NAND";
 #endif
-        const auto save = AppendBelowRoot(root, "/title/00010004/524d4350/data/rksys.dat");
+        const auto save = AppendBelowRoot(root, "/title/00010000/524f5550/data/share/system.bin");
         Require(save.has_value(), "Ordinary save path must translate");
-        Require(*save == root / "title" / "00010004" / "524d4350" / "data" / "rksys.dat",
+        Require(*save == root / "title" / "00010000" / "524f5550" / "data" / "share" / "system.bin",
                 "Ordinary save path must keep its components");
         Require(IsBelow(root, *save), "Ordinary save path must stay below the root");
 
@@ -56,7 +56,7 @@ int main() {
 
         Require(!IsSafeComponent(""), "Empty component is not a name");
         Require(!IsSafeComponent(std::string_view("a\0b", 3)), "Embedded NUL must be refused");
-        Require(IsSafeComponent("rksys.dat"), "Plain file name is safe");
+        Require(IsSafeComponent("system.bin"), "Plain file name is safe");
         Require(IsSafeComponent("..data"), "Leading dots alone are an ordinary name");
         Require(IsSafeComponent("wc24recv.mbx"), "WC24 mailbox name is safe");
     } catch (const std::exception& error) {

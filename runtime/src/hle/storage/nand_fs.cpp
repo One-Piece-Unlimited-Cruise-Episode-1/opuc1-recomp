@@ -1,5 +1,5 @@
-// NAND/ISFS HLE: redirects Wii NAND paths (e.g. /title/00010004/524d4350/data/rksys.dat) to
-// <nand_root>\title\00010004\524d4350\data\rksys.dat on the host.
+// NAND/ISFS HLE: redirects Wii NAND paths (e.g. /title/00010000/524f5550/data/share/system.bin) to
+// <nand_root>\title\00010000\524f5550\data\share\system.bin on the host.
 
 #include "nand_internal.h"
 
@@ -289,26 +289,6 @@ std::filesystem::path TranslateNandPath(const char* wiiPath) {
     }
 
     return BuildHostNandPath(wiiPathStr);
-}
-
-std::optional<int32_t> NandCheckSystemSaveRead(const char* who,
-    const std::filesystem::path& hostPath, int mode, bool ios) {
-    const auto action = RuntimeNandSave::CheckRead(hostPath, mode);
-    if (action == RuntimeNandSave::ReadAction::Proceed) return std::nullopt;
-    if (action == RuntimeNandSave::ReadAction::Missing) {
-        LogNandWarning(who, "treating empty or zero-filled system save '%s' as missing",
-                       HostPathText(hostPath).c_str());
-        return ios ? ISFS_ENOENT : NAND_RESULT_NOEXISTS;
-    }
-    if (action == RuntimeNandSave::ReadAction::RecoveryNeeded) {
-        LogNandError(who, "system save '%s' is missing or blank but its .nandsafe.tmp contains data; "
-                         "back up both files before attempting recovery",
-                     HostPathText(hostPath).c_str());
-    } else {
-        LogNandError(who, "could not inspect system save '%s' or its write shadow; leaving data untouched",
-                     HostPathText(hostPath).c_str());
-    }
-    return ios ? ISFS_EIO : NAND_RESULT_UNKNOWN;
 }
 
 // Create directories recursively

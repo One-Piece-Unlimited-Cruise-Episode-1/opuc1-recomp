@@ -166,11 +166,21 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   app's controller layout (`steam://forceinputappid/480`) while the window has focus, and the `[controller]`
   `steam_input_override` / `steam_input_app_id` keys are gone (old keys in a `Config.toml` are ignored), as is
   the overlay's unused Valve-controller check.
-- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 20 of 21 pass (three GameCube-pad test
-  targets went with the stack). `mkw_system_bridge_tests` used
+- Mario Kart test suites and checks removed (2026-11-23):
+  - `mkw_fiber_manager_tests`: it drove the scheduler through Mario Kart addresses (`__OSUnlockAllMutex` 801A8088,
+    `OSExitThread` 801AA0F0, `EGG::Thread::Run` 8024373C) in a 4 MiB fixture, which no longer holds OPUC's scheduler
+    flags at 0x8068A8xx. That is why it failed.
+  - `mkw_nand_save_tests` and the probe it tested. The probe treated a blank `rksys.dat` as missing.
+  - The RMC disc-ID region check in `dvd.cpp`.
+  - The NTSC-U/J region translation: `guest_versions.inc`, the RMCE01/RMCJ01 rows, `GuestRegion::Translate` /
+    `FatalUnknownAddress`, `kMkwGuestRegion`, and the translator's `MKW_TRANSLATED_GUEST_REGION`.
+    `MKW_GADDR(x)` is now the literal address.
+  - `native_cpu_calls.inc`: 38 native-call shortcuts keyed by Mario Kart addresses. None is an OPUC function start.
+  - The Mario Kart `initial_pipeline_cache.db` seed and the configure check that required it. Aurora starts without a
+    seed and logs that none was found.
+- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): all 19 pass. `mkw_system_bridge_tests` used
   to expect Mario Kart constructor tables (DOL + StaticR.rel); it now checks that the runtime runs no constructor itself
-  (OPUC's `__init_cpp` does). `mkw_fiber_manager_tests` (uncaught `Memory::AccessViolation: test memory bounds`) already
-  failed at 25cd2c7 and is not looked into yet. CI does not run ctest.
+  (OPUC's `__init_cpp` does). CI does not run ctest.
 
 - Basis: WiiCompiled (translator and runtime, GPL-3.0, with its aurora fork, MIT). See `docs/reference-study.md`.
   That name appears only where the basis is credited: README.md (Credits), docs/reference-study.md, the UPSTREAM.txt
@@ -185,7 +195,7 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   from `runtime/resources`; without a generated icon CMake warns and links no icon. Windows Explorer may show the old
   icon until its icon cache refreshes.
   The two MKWii Retro Rewind translator tests that referenced the missing upstream Launcher project were removed.
-- OPUC is single-region: `GuestRegion::RowOf` maps unknown addresses to themselves; `kFacts[Pal]` is `ROUPAF`
+- OPUC is single-region: `MKW_GADDR` is the main.dol address itself, and `GuestRegion::kFacts` is `ROUPAF`
   (maker `AF`, `__ArenaLo` 0x806A29C0).
 - `OPUC_UNBOUND(...)` = upstream HLE with no OPUC counterpart: the translated SDK code runs instead.
   `OPUC_TODO(...)` = upstream address use with no counterpart: evaluates to poison `0xF0xxxxxx`; the first access

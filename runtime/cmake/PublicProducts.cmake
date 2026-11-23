@@ -55,14 +55,8 @@ function(mkw_bound_translated_compiles target)
     endif()
 endfunction()
 
-# The region the translator built for; translated code and runtime/game bind addresses to it.
-if(NOT DEFINED MKW_TRANSLATED_GUEST_REGION)
-    message(FATAL_ERROR "The translator shard manifest names no guest region; re-run emit-build-shards.")
-endif()
-
 function(mkw_configure_translated_target target)
     mkw_configure_object_target(${target})
-    target_compile_definitions(${target} PRIVATE MKW_TRANSLATED_GUEST_REGION=${MKW_TRANSLATED_GUEST_REGION})
     mkw_apply_translated_compile_options(${target})
     mkw_bound_translated_compiles(${target})
 endfunction()
@@ -81,7 +75,6 @@ add_library(mkw_game_data OBJECT ${MKW_GAME_DATA_SOURCES})
 mkw_configure_object_target(mkw_game_data)
 target_compile_features(mkw_game_data PRIVATE cxx_std_20)
 target_compile_definitions(mkw_game_data PRIVATE
-    MKW_TRANSLATED_GUEST_REGION=${MKW_TRANSLATED_GUEST_REGION}
     SDL_MAIN_HANDLED
     _DISABLE_STRING_ANNOTATION _DISABLE_VECTOR_ANNOTATION)
 if(MKW_SETUP_VERSION)
@@ -231,18 +224,6 @@ function(mkw_configure_product target)
     endif()
     add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${MKW_DSP_COEFFICIENT_ROM}" "$<TARGET_FILE_DIR:${target}>/dsp_coef.bin" VERBATIM)
-
-    # Aurora imports this portable recipe database into each user's writable
-    # pipeline cache. Keep the upstream filename so its default resourcesPath
-    # lookup works without application-specific configuration.
-    set(MKW_INITIAL_PIPELINE_CACHE
-        "${MKW_RUNTIME_SOURCE_DIR}/assets/pipeline/initial_pipeline_cache.db")
-    if(NOT EXISTS "${MKW_INITIAL_PIPELINE_CACHE}")
-        message(FATAL_ERROR "Missing transferable Aurora pipeline cache: ${MKW_INITIAL_PIPELINE_CACHE}")
-    endif()
-    add_custom_command(TARGET ${target} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${MKW_INITIAL_PIPELINE_CACHE}"
-        "$<TARGET_FILE_DIR:${target}>/initial_pipeline_cache.db" VERBATIM)
 
 endfunction()
 

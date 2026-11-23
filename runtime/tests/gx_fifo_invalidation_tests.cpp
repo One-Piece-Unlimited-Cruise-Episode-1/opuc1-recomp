@@ -16,7 +16,6 @@ std::vector<std::vector<uint8_t>> g_deferredBursts;
 }
 
 // Host seams; the runtime parser and Aurora encoder/decoder are linked unchanged.
-extern "C" const uint8_t kMkwGuestRegion = 0;
 GxDisplayListState g_dlRecordState;
 std::atomic_bool g_auroraFrameActive{false};
 std::atomic_bool g_auroraFrameHadWork{false};

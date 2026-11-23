@@ -4,7 +4,6 @@
 
 #include <deque>
 
-extern "C" const uint8_t kMkwGuestRegion = 0;
 
 namespace TextureBindingTest {
 std::array<uint8_t, 4 * 1024 * 1024> memory{};

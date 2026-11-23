@@ -174,8 +174,6 @@ static int32_t NAND_IOS_Open_Impl(uint32_t pathPtr, uint32_t mode) {
         return ISFS_EINVAL;
     }
 
-    if (const auto result = NandCheckSystemSaveRead("IOS_Open", hostPath, mode, true))
-        return *result;
     
     // Determine file mode. IOS never creates files on open - creation happens
     // exclusively through ISFS CreateFile (which we implement). The previous

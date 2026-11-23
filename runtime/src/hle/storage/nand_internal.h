@@ -9,7 +9,6 @@
 #include "hle/runtime_parse_helpers.h"
 #include "memory.h"
 #include "nand_path.h"
-#include "nand_save_probe.h"
 #include "hle/bluetooth_hle.h"
 #include "hle/wc24/kd_offline.h"
 #include "runtime_config.h"
@@ -57,11 +56,6 @@ inline uint32_t NandTitleIdLo() { return ::GuestRegion::CurrentFacts().gameCode;
 void LogNandError(const char* func, const char* fmt, ...);
 void NandQueueIosCallback(uint32_t callbackPtr, int32_t result, uint32_t callbackArg);
 void LogNandWarning(const char* func, const char* fmt, ...);
-
-// An empty optional means continue opening normally; otherwise return the
-// supplied NAND/IOS error without exposing a failed scan as a missing save.
-std::optional<int32_t> NandCheckSystemSaveRead(const char* who,
-    const std::filesystem::path& hostPath, int mode, bool ios = false);
 
 // ============================================================================
 // File Descriptor Management

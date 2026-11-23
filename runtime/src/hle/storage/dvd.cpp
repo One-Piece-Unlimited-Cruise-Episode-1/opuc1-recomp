@@ -182,12 +182,6 @@ static const fs::path& GetDvdRoot() {
             if (!file.read(id, 6)) {
                 FailDvdRoot("Configured DVD root has an unreadable or truncated sys/boot.bin", bootBin);
             }
-            if (std::memcmp(id, "RMC", 3) == 0 && id[3] != ::GuestRegion::CurrentFacts().letter) {
-                FailDvd("dvd_region_mismatch", "DVD region mismatch",
-                        std::string("Configured DVD root has disc ID '") + id +
-                        "', but this build was compiled for region " + ::GuestRegion::CurrentFacts().gameId +
-                        ".\nThe extracted game assets must match the region of the compiled executable.");
-            }
         }
         g_dvdRoot = path;
     });
@@ -828,7 +822,6 @@ extern "C" void DVDInit_8015EA1C()
     }
 
     // 3. Set Low Memory Globals (The "Magic" Identification)
-    // This tells the game "Yes, I am Mario Kart Wii"
     uint32_t diskHeader = 0x80000000;
     Memory::Write32(diskHeader + 0x00, CurrentDiscGameCode());
     Memory::Write16(diskHeader + 0x04, 0x4146);     // OPUC: 'AF' (Maker, boot.bin ROUPAF)

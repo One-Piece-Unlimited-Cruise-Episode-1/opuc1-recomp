@@ -84,11 +84,6 @@ endif()
 add_test(NAME mkw_memory_access_tests COMMAND mkw_memory_access_tests)
 set_tests_properties(mkw_memory_access_tests PROPERTIES TIMEOUT 60)
 
-add_executable(mkw_nand_save_tests "${MKW_TEST_RUNTIME_DIR}/tests/nand_save_tests.cpp")
-target_include_directories(mkw_nand_save_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")
-target_compile_features(mkw_nand_save_tests PRIVATE cxx_std_17)
-add_test(NAME mkw_nand_save_tests COMMAND mkw_nand_save_tests)
-
 add_executable(mkw_nand_guest_path_tests "${MKW_TEST_RUNTIME_DIR}/tests/nand_guest_path_tests.cpp")
 target_include_directories(mkw_nand_guest_path_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")
 target_compile_features(mkw_nand_guest_path_tests PRIVATE cxx_std_17)
@@ -215,34 +210,12 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64|X86_64)$")
     target_compile_options(mkw_ax_mix_kernels_tests PRIVATE -march=x86-64-v2)
 endif()
 
-add_executable(mkw_fiber_manager_tests
-  "${MKW_TEST_RUNTIME_DIR}/tests/fiber_manager_tests.cpp"
-  "${MKW_TEST_RUNTIME_DIR}/src/fiber_manager.cpp"
-  "${MKW_TEST_RUNTIME_DIR}/src/hle/os/os_scheduler.cpp"
-  "${MKW_TEST_RUNTIME_DIR}/src/hle/storage/nand_callbacks.cpp"
-  "${MKW_TEST_RUNTIME_DIR}/src/hle/os/os_thread.cpp")
-target_include_directories(mkw_fiber_manager_tests PRIVATE
-  "${MKW_TEST_RUNTIME_DIR}/tests/fiber_support"
-  "${MKW_TEST_RUNTIME_DIR}/include" "${MKW_TEST_RUNTIME_DIR}/src"
-  "${MKW_TEST_RUNTIME_DIR}/third_party"
-  "${MKW_TEST_RUNTIME_DIR}/third_party/toml11")
-target_compile_features(mkw_fiber_manager_tests PRIVATE cxx_std_20)
-target_link_libraries(mkw_fiber_manager_tests PRIVATE Threads::Threads)
-if(MKW_PLATFORM_MACOS_ARM64)
-  enable_language(ASM)
-  target_sources(mkw_fiber_manager_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/src/platform/macos/co_switch.S")
-elseif(TARGET mkw::libco)
-  target_link_libraries(mkw_fiber_manager_tests PRIVATE mkw::libco)
-endif()
-set_target_properties(mkw_fiber_manager_tests PROPERTIES UNITY_BUILD OFF)
-add_test(NAME mkw_fiber_manager_tests COMMAND mkw_fiber_manager_tests)
 add_executable(mkw_audio_backend_ownership_tests "${MKW_TEST_RUNTIME_DIR}/tests/audio_backend_ownership_tests.cpp" "${MKW_TEST_RUNTIME_DIR}/src/audio_backend.cpp")
 target_include_directories(mkw_audio_backend_ownership_tests BEFORE PRIVATE "${MKW_TEST_RUNTIME_DIR}/tests/host_io" "${MKW_TEST_RUNTIME_DIR}/include" "${MKW_TEST_RUNTIME_DIR}/src")
 target_compile_features(mkw_audio_backend_ownership_tests PRIVATE cxx_std_20)
 add_test(NAME mkw_audio_backend_ownership_tests COMMAND mkw_audio_backend_ownership_tests)
 set_target_properties(mkw_audio_backend_ownership_tests PROPERTIES UNITY_BUILD OFF)
 add_test(NAME mkw_windows_seh_order_tests COMMAND "${CMAKE_COMMAND}" "-DSEH_SOURCE=${MKW_TEST_RUNTIME_DIR}/src/main.cpp" -P "${MKW_TEST_RUNTIME_DIR}/tests/windows_seh_order_tests.cmake")
-set_tests_properties(mkw_fiber_manager_tests PROPERTIES TIMEOUT 60)
 
 target_link_libraries(mkw_nand_settings_tests PRIVATE Threads::Threads)
 target_include_directories(mkw_nand_settings_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")

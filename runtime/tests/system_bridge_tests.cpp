@@ -48,7 +48,6 @@ const Descriptor& Active() noexcept {
 }
 }
 extern "C" {
-extern const uint8_t kMkwGuestRegion = 0;
 extern const uint32_t kGuestMapSymbolCount = 0;
 extern const uint32_t kGuestMapSymbolAddresses[] = {0};
 extern const char* const kGuestMapSymbolNames[] = {""};

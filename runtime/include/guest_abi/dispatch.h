@@ -281,7 +281,6 @@ struct IsPureTypedNativeCpuCall : std::false_type {};
 template <typename T>
 struct IsPureTypedNativeCpuCall<T, std::void_t<decltype(T::kPure)>> : std::bool_constant<T::kPure> {};
 
-#include "guest_abi/native_cpu_calls.inc"
 
 // Direct-mapped thread-local memo in front of the registry lookup for targets without a raw
 // dispatch record; a miss just re-runs the lookup. 512 entries (12 KiB) covers the per-frame indirect

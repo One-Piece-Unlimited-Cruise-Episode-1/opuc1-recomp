@@ -82,7 +82,6 @@ public sealed class TranslatedBuildShardEmitterTests
             Assert.Equal(2, first.BaseShardCount);
 
             var cmake = File.ReadAllText(first.CMakeManifestPath);
-            Assert.Contains("set(MKW_TRANSLATED_GUEST_REGION 0)", cmake);
             Assert.Contains("set(MKW_BASE_FUNCTION_COUNT 2)", cmake);
             Assert.Contains("set(MKW_SHARED_BASE_FUNCTION_COUNT 2)", cmake);
             Assert.Contains("set(MKW_PROFILE_SENSITIVE_CALLER_COUNT 0)", cmake);

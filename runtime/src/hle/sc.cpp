@@ -114,8 +114,7 @@ extern "C" uint32_t SCGetProductGameRegion_HLE()
 
 PPC_NATIVE_OVERRIDE(802BE9E0 /*mkw:801B24C8*/, SCGetProductGameRegion_HLE, uint32_t, (), ());
 
-// These stubs make the game think all titles are installed; otherwise it checks title ID
-// 0x00010004524d4350 ("RMCP", Mario Kart Wii PAL) and reports error code 5.
+// These stubs report every title as installed, so a title-installed check never fails.
 
 // 0x801AE4A0 -> OS__IsTitleInstalled(titleIdHi, titleIdLo)
 // Returns: 1 = installed, 0 = not installed

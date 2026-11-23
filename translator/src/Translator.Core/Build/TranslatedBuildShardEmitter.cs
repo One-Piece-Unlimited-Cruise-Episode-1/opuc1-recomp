@@ -792,9 +792,8 @@ public static partial class TranslatedBuildShardEmitter
         var output = new StringBuilder();
         output.AppendLine("# Translator-owned stable shard graph; do not edit.");
         output.AppendLine($"set(MKW_TRANSLATED_SHARD_ROOT \"{CMakePath(outputRoot)}\")");
-        // The runtime CMake reads these too: the one guest region (PAL, 0), every active base
-        // function in the shared library, and no profile-sensitive callers or sensitive shards.
-        output.AppendLine("set(MKW_TRANSLATED_GUEST_REGION 0)");
+        // The runtime CMake reads these too: every active base function in the shared library,
+        // and no profile-sensitive callers or sensitive shards.
         output.AppendLine($"set(MKW_BASE_FUNCTION_COUNT {activeBaseCount})");
         output.AppendLine($"set(MKW_SHARED_BASE_FUNCTION_COUNT {activeBaseCount})");
         output.AppendLine($"set(MKW_PORTABLE_SHARED_BASE_FUNCTION_COUNT {activeBaseCount})");

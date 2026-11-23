@@ -29,7 +29,6 @@ void observe_copy(TextureHandle target, ClipRect rect, bool clearColor, bool cle
 } // namespace aurora::gfx
 
 extern "C" {
-const uint8_t kMkwGuestRegion = 0;
 int g_gxFrameCount = 0;
 }
 TexCopyState g_texCopyState;

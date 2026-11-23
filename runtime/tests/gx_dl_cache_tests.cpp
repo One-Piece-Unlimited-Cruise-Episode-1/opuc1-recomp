@@ -8,7 +8,6 @@
 #include <stdexcept>
 #include <string_view>
 
-extern "C" const uint8_t kMkwGuestRegion = 0;
 
 namespace {
 thread_local int g_allocationsBeforeFailure = -1;
