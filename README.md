@@ -31,7 +31,7 @@ first boot.
 event, then hands control of Luffy to you.
 
 **Keyboard, mouse and gamepad.** A virtual Wii Remote + Nunchuk is driven from the keyboard and mouse, or from the first
-SDL gamepad. Default keyboard layout:
+SDL gamepad. The layouts are fixed. Keyboard and mouse:
 
 | Action | Keys |
 |---|---|
@@ -47,8 +47,12 @@ SDL gamepad. Default keyboard layout:
 
 In menus and windows the layout switches to menu use (WASD moves the cursor, Esc and right click go back).
 
-**An in-game settings bar.** Press **F10** in the game window for the runtime settings bar (resolution, controllers,
-volume). Changes go to `Config.toml`.
+Gamepad: left stick = Nunchuk stick, South = A, East = B, West = 1, North = 2, Start = +, Back = −, Guide = HOME,
+D-pad = D-pad, left trigger = Z, left shoulder = C, right shoulder = shake.
+
+**An in-game settings bar.** Press **F10** in the game window for the runtime settings bar: resolution and display,
+audio, and a Controllers page that shows the detected gamepad and can set up one SDL does not recognise. Changes go to
+`Config.toml`.
 
 **Offline only.** The game has no online features, so the runtime has no network stack: no sockets, TLS or
 WiiConnect24 service, and it never connects to the internet. The two local WiiConnect24 requests the game's SDK makes at

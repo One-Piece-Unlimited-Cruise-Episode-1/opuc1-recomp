@@ -76,8 +76,8 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
    on four addresses, one of them `VISetPreRetraceCallback`). `build-function-map.mjs` now drops names matched at
    more than one address; single-address false matches are still possible, so each library batch confirms its
    bindings in Ghidra.
-7. Strip what is left of the inherited Mario Kart extras: the GameCube-pad
-   input stack (`input_bindings`, `input_expr`, `motion_trick*`, mapping wizard), real Wii Remote support, Crypto++.
+7. Strip what is left of the inherited Mario Kart extras: real Wii Remote support (Bluetooth host, pairing,
+   L2CAP/HID/SDP link), Crypto++ (ES signing and /dev/sha only), the Steam Input override.
 8. M4b: serve the disc from `data/opuc1.iso` with nod (aurora already fetches it for `aurora_dvd`): open the DATA
    partition, publish its FST at 0x80000038, read files through `nod_partition_open_file`.
 
@@ -151,7 +151,14 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   Every removed hook was `OPUC_UNBOUND` or keyed to an `OPUC_TODO` address, so translation output did not change.
   Unbound generic SDK accessors (SC Bluetooth/WPAD items, SC product/serial, the nw4r::lyt quad path) stay until a
   Ghidra check rebinds or rules them out.
-- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 23 of 24 pass. `mkw_system_bridge_tests` used
+- GameCube pad stack removed (2026-11-23): the game reads only KPAD, so the PAD emulation behind PADRead, the
+  per-player GameCube mapping, keyboard-to-pad bindings, Dolphin input expressions (GCPadNew.ini import) and motion
+  tricks are gone, with their config keys and tests. A traced run showed the game calling PADReset(0xF0000000) once at
+  boot and never PADRecalibrate (vault `entities/pad-input`); both stay bound to aurora's PAD layer. The F10
+  Controllers page now shows the detected gamepad, the SDL mapping wizard, the Wii Remote section and vibration;
+  `input_bindings` is only the overlay's input-blocked flag.
+- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 20 of 21 pass (three GameCube-pad test
+  targets went with the stack). `mkw_system_bridge_tests` used
   to expect Mario Kart constructor tables (DOL + StaticR.rel); it now checks that the runtime runs no constructor itself
   (OPUC's `__init_cpp` does). `mkw_fiber_manager_tests` (uncaught `Memory::AccessViolation: test memory bounds`) already
   failed at 25cd2c7 and is not looked into yet. CI does not run ctest.

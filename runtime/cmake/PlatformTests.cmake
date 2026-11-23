@@ -136,18 +136,6 @@ if(MKW_PLATFORM_WINDOWS)
     target_link_libraries(mkw_runtime_config_io_tests PRIVATE advapi32)
 endif()
 
-if(TARGET SDL3::SDL3)
-    add_executable(mkw_pad_trigger_tests "${MKW_TEST_RUNTIME_DIR}/tests/pad_trigger_tests.cpp")
-    target_include_directories(mkw_pad_trigger_tests PRIVATE
-        "${MKW_TEST_RUNTIME_DIR}/tests/pad_trigger_support"
-        "${MKW_TEST_RUNTIME_DIR}/include" "${MKW_AURORA_DIR}/include")
-    target_compile_definitions(mkw_pad_trigger_tests PRIVATE TARGET_PC=1 AURORA)
-    target_compile_features(mkw_pad_trigger_tests PRIVATE cxx_std_20)
-    target_link_libraries(mkw_pad_trigger_tests PRIVATE SDL3::SDL3)
-    set_target_properties(mkw_pad_trigger_tests PROPERTIES UNITY_BUILD OFF)
-    add_test(NAME mkw_pad_trigger_tests COMMAND mkw_pad_trigger_tests)
-endif()
-
 if(TARGET gx_fifo_tests)
     target_sources(gx_fifo_tests PRIVATE
         "${MKW_TEST_RUNTIME_DIR}/tests/gx_fifo_invalidation_tests.cpp"
@@ -265,24 +253,6 @@ add_executable(mkw_sc_serial_tests "${MKW_TEST_RUNTIME_DIR}/tests/sc_serial_test
 target_include_directories(mkw_sc_serial_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")
 target_compile_features(mkw_sc_serial_tests PRIVATE cxx_std_17)
 add_test(NAME mkw_sc_serial_tests COMMAND mkw_sc_serial_tests)
-
-# The input expression engine is self-contained, so it can be exercised without
-# linking the runtime or SDL.
-add_executable(mkw_input_expr_tests
-    "${MKW_TEST_RUNTIME_DIR}/tests/test_expr.cpp"
-    "${MKW_TEST_RUNTIME_DIR}/src/input_expr.cpp")
-target_include_directories(mkw_input_expr_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")
-target_compile_features(mkw_input_expr_tests PRIVATE cxx_std_17)
-add_test(NAME mkw_input_expr_tests COMMAND mkw_input_expr_tests)
-
-add_executable(mkw_motion_trick_tests
-    "${MKW_TEST_RUNTIME_DIR}/tests/motion_trick_tests.cpp"
-    "${MKW_TEST_RUNTIME_DIR}/src/motion_trick_detector.cpp")
-target_include_directories(mkw_motion_trick_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/include")
-target_compile_features(mkw_motion_trick_tests PRIVATE cxx_std_17)
-# Match the runtime's float model so the bad-data guard is tested as shipped.
-target_compile_options(mkw_motion_trick_tests PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-ffast-math>)
-add_test(NAME mkw_motion_trick_tests COMMAND mkw_motion_trick_tests)
 
 # The emulated Bluetooth controller is pure host code.
 add_executable(mkw_bluetooth_controller_tests

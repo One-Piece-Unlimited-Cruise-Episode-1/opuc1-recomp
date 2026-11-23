@@ -84,20 +84,8 @@ struct RuntimeUserConfig {
     // The one canonical Retro Rewind installation, owned and updated by the frontend. Setup records
     // it here instead of copying the pack, so an asset-only update is visible on the next launch.
     std::vector<std::string> overlayRoots;
-    // Controller mappings use Wii/GameCube button names as keys and up to two
-    // comma-separated SDL-style physical button names ("south", or
-    // "dpad_up,left_shoulder") as values; pressing either bound button counts.
-    std::array<std::optional<std::string>, 12> controllerButtons;
-    // Per-port overrides of controllerButtons ("a_1" .. "right_4", the suffix is port + 1).
-    // A port falls back to the shared controllerButtons entry while its override is unset, so
-    // configs written before per-port bindings keep applying to every port unchanged.
-    std::array<std::array<std::optional<std::string>, 12>, 4> controllerPortButtons;
     std::optional<bool> rumbleEnabled;
-    // Shake a motion controller to press the D-pad, like shaking a Wii Remote.
-    std::optional<bool> motionTrick;
-    std::optional<int32_t> motionTrickSensitivity;
     std::optional<int32_t> muteHotkey;
-    std::map<std::string, std::string> controllerExpressions;
 };
 
 namespace RuntimeConfigFile {
@@ -394,45 +382,9 @@ inline void AppendOverlayRoots(RuntimeUserConfig& config, const std::string& roo
 inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     RuntimeUserConfig config;
 
-    static constexpr std::array<std::string_view, 12> buttonKeys = {
-        "a", "b", "x", "y", "start", "z", "l", "r", "up", "down", "left", "right",
-    };
-    for (size_t index = 0; index < buttonKeys.size(); ++index) {
-        config.controllerButtons[index] =
-            FindConfigValue<std::string>(document, "controller", buttonKeys[index]);
-    }
-
     config.rumbleEnabled = FindConfigValue<bool>(document, "controller", "rumble");
-    config.motionTrick = FindConfigValue<bool>(document, "controller", "motion_trick");
-    if (const auto value = FindConfigInt(document, "controller", "motion_trick_sensitivity"); value && *value >= 1 && *value <= 5) {
-        config.motionTrickSensitivity = *value;
-    }
     if (auto value = FindConfigInt(document, "audio", "mute_key")) {
         config.muteHotkey = *value;
-    }
-
-    if (const auto* section = document.contains("controller") ? &document.at("controller") : nullptr;
-        section != nullptr && section->is_table()) {
-        for (const auto& [key, value] : section->as_table()) {
-            if (key.rfind("expr_", 0) == 0 && value.is_string()) {
-                config.controllerExpressions[key] = value.as_string();
-                continue;
-            }
-            // "<button>_<port + 1>" overrides of the shared [controller] bindings. No button
-            // name contains an underscore, so the last underscore always splits off the port.
-            const auto split = key.find_last_of('_');
-            if (split == std::string::npos || split == 0 || split + 2 != key.size() ||
-                key[split + 1] < '1' || key[split + 1] > '4' || !value.is_string()) {
-                continue;
-            }
-            const std::string button(key.substr(0, split));
-            for (size_t index = 0; index < buttonKeys.size(); ++index) {
-                if (button == buttonKeys[index]) {
-                    config.controllerPortButtons[key[split + 1] - '1'][index] = value.as_string();
-                    break;
-                }
-            }
-        }
     }
 
     config.widescreen = FindConfigValue<bool>(document, "video", "widescreen");
@@ -556,15 +508,6 @@ inline const RuntimeUserConfig& Get() {
 
 inline RuntimeUserConfig& Mutable() {
     return const_cast<RuntimeUserConfig&>(Get());
-}
-
-inline constexpr std::array<std::string_view, 12> kControllerButtonKeys = {
-    "a", "b", "x", "y", "start", "z", "l", "r", "up", "down", "left", "right",
-};
-
-inline const std::optional<std::string>& ControllerButton(size_t index) {
-    static const std::optional<std::string> empty;
-    return index < Get().controllerButtons.size() ? Get().controllerButtons[index] : empty;
 }
 
 // Sets section.key (section may be a dotted table path) to a TOML literal, keeping the rest of the
@@ -708,57 +651,6 @@ inline bool SetShowFps(bool value) {
     return WriteSetting("video", "show_fps", value ? "true" : "false");
 }
 
-inline bool SetControllerButton(size_t index, std::string value) {
-    if (index >= kControllerButtonKeys.size()) {
-        return false;
-    }
-    Mutable().controllerButtons[index] = value;
-    return WriteSetting("controller", kControllerButtonKeys[index], FormatString(value));
-}
-
-// Per-port bindings are stored as "[controller] <key>_<port + 1>" (a_1 .. right_4). The shared
-// [controller] bindings remain the fallback for ports that were never rebound individually.
-inline constexpr size_t kControllerPortCount = 4;
-
-inline std::string PortControllerButtonKey(uint32_t port, size_t index) {
-    if (port >= kControllerPortCount || index >= kControllerButtonKeys.size()) {
-        return {};
-    }
-    return std::string(kControllerButtonKeys[index]) + "_" + std::to_string(port + 1);
-}
-
-// The port's own override when set, else the shared binding that every port used before
-// per-port bindings existed.
-inline const std::optional<std::string>& PortControllerButton(uint32_t port, size_t index) {
-    static const std::optional<std::string> empty;
-    if (port < kControllerPortCount && index < kControllerButtonKeys.size()) {
-        const auto& portValue = Get().controllerPortButtons[port][index];
-        if (portValue) {
-            return portValue;
-        }
-    }
-    return ControllerButton(index);
-}
-
-inline bool SetPortControllerButton(uint32_t port, size_t index, std::string value) {
-    const std::string key = PortControllerButtonKey(port, index);
-    if (key.empty()) {
-        return false;
-    }
-    Mutable().controllerPortButtons[port][index] = value;
-    return WriteSetting("controller", key, FormatString(value));
-}
-
-inline std::string ControllerExpression(const std::string& key) {
-    const auto it = Get().controllerExpressions.find(key);
-    return it == Get().controllerExpressions.end() ? std::string() : it->second;
-}
-
-inline bool SetControllerExpression(const std::string& key, const std::string& value) {
-    Mutable().controllerExpressions[key] = value;
-    return WriteSetting("controller", key, FormatString(value));
-}
-
 inline bool RumbleEnabled(bool fallback = true) {
     return Get().rumbleEnabled.value_or(fallback);
 }
@@ -766,24 +658,6 @@ inline bool RumbleEnabled(bool fallback = true) {
 inline bool SetRumbleEnabled(bool value) {
     Mutable().rumbleEnabled = value;
     return WriteSetting("controller", "rumble", value ? "true" : "false");
-}
-
-inline bool MotionTrickEnabled(bool fallback = false) {
-    return Get().motionTrick.value_or(fallback);
-}
-
-inline bool SetMotionTrickEnabled(bool value) {
-    Mutable().motionTrick = value;
-    return WriteSetting("controller", "motion_trick", value ? "true" : "false");
-}
-
-inline int32_t MotionTrickSensitivity(int32_t fallback = 3) {
-    return Get().motionTrickSensitivity.value_or(fallback);
-}
-
-inline bool SetMotionTrickSensitivity(int32_t value) {
-    Mutable().motionTrickSensitivity = value;
-    return WriteSetting("controller", "motion_trick_sensitivity", std::to_string(value));
 }
 
 inline int32_t MuteHotkey(int32_t fallback) {
