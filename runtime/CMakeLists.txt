@@ -98,13 +98,6 @@ set(MKW_NATIVE_PREBUILT_EXPORT_DIR "" CACHE PATH
 option(MKW_USE_PREBUILT_RUNTIME
     "Link the native prebuilt package's runtime archive when it matches this workspace" ON)
 
-# The two Crypto++ configuration macros are load-bearing for ABI: they shape the
-# structs and inline code the headers generate, so a first-party TU including
-# <cryptopp/...> must see exactly what the archive was compiled with. Both the
-# from-source target below and the prebuilt import in cmake/NativePrebuilt.cmake
-# consume this one definition.
-set(MKW_CRYPTOPP_INTERFACE_DEFINITIONS CRYPTOPP_DISABLE_ASM CRYPTOPP_NO_GLOBAL_BYTE)
-
 # Riivolution XML is parsed with pugixml, matching the parser used by Dolphin.
 # The four upstream files from v1.15 (ee86beb30e4973f5feffe3ce63bfa4fbadf72f38)
 # are vendored so builds remain usable with FETCHCONTENT_FULLY_DISCONNECTED.
@@ -122,32 +115,6 @@ add_library(mkw::toml11 ALIAS mkw_toml11)
 target_include_directories(mkw_toml11 SYSTEM INTERFACE third_party/toml11)
 target_compile_features(mkw_toml11 INTERFACE cxx_std_17)
 
-# Wii ES signatures use the standard binary-field sect233r1 curve. Crypto++
-# supplies that curve, SHA-1, ECDSA and an OS-seeded CSPRNG. The complete 8.9.0
-# source distribution is vendored. Assembly and algorithm-specific SIMD units
-# are disabled to keep the library portable and independent of the runtime's
-# x86-64-v3 policy; the static linker retains only the algorithms we reference.
-#
-# Crypto++ is by far the most expensive vendored library to compile (~150
-# translation units), and under the shipped fixed toolchain it is bit-for-bit
-# identical for every user, so the prebuilt package harvests its archive and
-# this block is skipped entirely in that mode (see cmake/NativePrebuilt.cmake).
-if(NOT MKW_NATIVE_PREBUILT_DIR)
-    file(GLOB MKW_CRYPTOPP_SOURCES CONFIGURE_DEPENDS
-        "${CMAKE_CURRENT_LIST_DIR}/third_party/cryptopp/*.cpp")
-    list(FILTER MKW_CRYPTOPP_SOURCES EXCLUDE REGEX
-        "/(adhoc|bench[123]|datatest|dlltest|fipsalgt|fipstest|pch|regtest[1234]|simple|test|validat[0-9]+)\\.cpp$")
-    list(FILTER MKW_CRYPTOPP_SOURCES EXCLUDE REGEX
-        "(_avx|_ppc|_simd|_sse)\\.cpp$")
-    add_library(mkw_cryptopp STATIC ${MKW_CRYPTOPP_SOURCES})
-    add_library(mkw::cryptopp ALIAS mkw_cryptopp)
-    target_include_directories(mkw_cryptopp SYSTEM PUBLIC third_party)
-    target_compile_features(mkw_cryptopp PUBLIC cxx_std_17)
-    target_compile_definitions(mkw_cryptopp PUBLIC ${MKW_CRYPTOPP_INTERFACE_DEFINITIONS})
-    target_compile_options(mkw_cryptopp PRIVATE -w)
-    set_target_properties(mkw_cryptopp PROPERTIES UNITY_BUILD OFF)
-endif()
-
 set(MKW_TRANSLATED_COMPILE_JOBS 0 CACHE STRING
     "Cap on concurrently compiling translated shard TUs via a Ninja job pool (0 = uncapped). \
 Scheduling only - never affects output bytes, so it is deliberately outside the canonical flag fingerprint.")
@@ -155,8 +122,7 @@ set(MKW_CPPWINRT_INCLUDE_DIR "" CACHE PATH "Optional self-contained C++/WinRT in
 
 # Precompiled aurora + third-party package (see launcher/Prepare-NativePrebuilt.ps1).
 # Empty - the default - keeps the from-source behaviour every developer build
-# uses. When set, aurora-main, its extern/ tree and the vendored Crypto++ are
-# not compiled at all; imported targets with the same names are wired up from
+# uses. When set, aurora and its extern/ tree are not compiled at all; imported targets with the same names are wired up from
 # the package instead, so this project's own code compiles and links exactly
 # as before.
 set(MKW_AURORA_DIR "${CMAKE_CURRENT_LIST_DIR}/../aurora-main" CACHE PATH
@@ -378,7 +344,7 @@ else()
         target_compile_definitions(mkw_macos_native_compile PRIVATE SDL_MAIN_HANDLED TARGET_PC)
         target_link_libraries(mkw_macos_native_compile PRIVATE
             aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx
-            mkw::pugixml mkw::toml11 mkw::cryptopp)
+            mkw::pugixml mkw::toml11)
         if(MKW_PLATFORM_MACOS_X86_64)
             target_link_libraries(mkw_macos_native_compile PRIVATE mkw::libco)
             target_compile_options(mkw_macos_native_compile PRIVATE

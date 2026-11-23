@@ -71,19 +71,12 @@ set_target_properties(mkw_np_probe PROPERTIES UNITY_BUILD OFF)
 target_compile_features(mkw_np_probe PRIVATE cxx_std_20)
 # Exactly what mkw_runtime_common and the products link (PublicProducts.cmake)
 # with one deliberate exception: pugixml stays a locally compiled single
-# translation unit, so it must not enter this closure. The runtime's vendored
-# Crypto++ does join the harvest - ~150 translation units that are identical
-# for every user under the pinned toolchain and flag set.
+# translation unit, so it must not enter this closure.
 target_link_libraries(mkw_np_probe PRIVATE
-    aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx
-    mkw::cryptopp)
+    aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx)
 
 get_filename_component(_mkw_np_aurora_dir "${MKW_AURORA_DIR}" ABSOLUTE)
 mkw_collect_buildsystem_targets("${_mkw_np_aurora_dir}" _mkw_np_all_targets)
-# mkw_cryptopp is defined by this runtime project, not under aurora-main, so
-# the scan above cannot see it; it is appended explicitly. The type and closure
-# checks below still apply to it.
-list(APPEND _mkw_np_all_targets "mkw_cryptopp")
 # The game-independent runtime archive (RuntimeLibrary.cmake). It is outside the
 # probe closure, so it ships only when the harvester builds it explicitly.
 if(TARGET mkw_runtime)

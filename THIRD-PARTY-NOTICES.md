@@ -61,14 +61,6 @@ The Riivolution XML reader uses pugixml 1.15, vendored in
 `runtime/third_party/pugixml` from commit `ee86beb30e4973f5feffe3ce63bfa4fbadf72f38`.
 Source and license: <https://github.com/zeux/pugixml>
 
-### Crypto++ 8.9.0 - Boost Software License 1.0 / public domain
-
-Copyright (c) 1995-2019 Wei Dai and contributors.
-The runtime uses Crypto++ for SHA-1 and sect233r1 ECDSA key derivation and signing. Its portable
-sources are vendored in `runtime/third_party/cryptopp`; assembly implementations are disabled.
-Source: <https://github.com/weidai11/cryptopp/tree/CRYPTOPP_8_9_0>. Full license text:
-`runtime/third_party/cryptopp/License.txt`.
-
 ### toml11 4.4.0 - MIT
 
 Copyright (c) 2017 Toru Niina.

@@ -94,36 +94,6 @@ foreach(_target IN LISTS MKW_NP_AURORA_TARGETS)
     set_target_properties(${_target} PROPERTIES INTERFACE_LINK_LIBRARIES mkw_native_prebuilt)
 endforeach()
 
-# The vendored Crypto++ ships precompiled alongside aurora: under the fixed
-# toolchain its archive is identical for every user, so compiling ~150 of its
-# translation units locally buys nothing. Only the archive is consumed here -
-# the vendored headers still ship in the workspace because first-party TUs
-# include them directly (runtime/include/wii_es_crypto.h).
-if(NOT MKW_CRYPTOPP_INTERFACE_DEFINITIONS)
-    message(FATAL_ERROR
-        "The prebuilt consumer requires MKW_CRYPTOPP_INTERFACE_DEFINITIONS from "
-        "the top-level CMakeLists.txt; without them first-party TUs would compile "
-        "against Crypto++ headers configured differently than the archive.")
-endif()
-file(GLOB _mkw_np_cryptopp_archives "${MKW_NP_PACKAGE_DIR}/lib/libmkw_cryptopp.a")
-list(LENGTH _mkw_np_cryptopp_archives _mkw_np_cryptopp_count)
-if(NOT _mkw_np_cryptopp_count EQUAL 1)
-    message(FATAL_ERROR
-        "The precompiled package must contain exactly one libmkw_cryptopp.a: "
-        "${MKW_NP_PACKAGE_DIR}")
-endif()
-if(NOT TARGET mkw_cryptopp)
-    add_library(mkw_cryptopp STATIC IMPORTED GLOBAL)
-    set_target_properties(mkw_cryptopp PROPERTIES
-        IMPORTED_LOCATION "${_mkw_np_cryptopp_archives}"
-        INTERFACE_INCLUDE_DIRECTORIES "${MKW_NP_RUNTIME_DIR}/third_party"
-        INTERFACE_COMPILE_DEFINITIONS "${MKW_CRYPTOPP_INTERFACE_DEFINITIONS}")
-    add_library(mkw::cryptopp ALIAS mkw_cryptopp)
-endif()
-# The aggregate link list carries the same archive once more (the harvest probe
-# linked it, so the probe-vs-control diff includes it). Repeating a static
-# archive on the link line is harmless; the second pass resolves no members.
-
 list(LENGTH _mkw_np_links _mkw_np_link_count)
 message(STATUS
     "Aurora and third-party libraries come from the precompiled package "

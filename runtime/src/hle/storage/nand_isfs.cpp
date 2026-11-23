@@ -11,44 +11,6 @@
 #include "runtime_log.h"
 
 
-// ============================================================================
-// SHA device handles
-// ============================================================================
-
-struct ShaHandle {
-    CryptoPP::SHA1 hash;
-    uint64_t byteCount = 0;
-
-    void Restart() {
-        hash.Restart();
-        byteCount = 0;
-    }
-};
-
-static std::map<int32_t, ShaHandle> g_shaHandles;
-static int32_t g_nextShaFd = 0x10001;
-static std::mutex g_shaMutex;
-
-static int32_t AllocateShaFd() {
-    std::lock_guard<std::mutex> lock(g_shaMutex);
-    const int32_t fd = g_nextShaFd++;
-    g_shaHandles.try_emplace(fd);
-    return fd;
-}
-
-static ShaHandle* GetShaHandle(int32_t fd) {
-    auto it = g_shaHandles.find(fd);
-    if (it == g_shaHandles.end()) {
-        return nullptr;
-    }
-    return &it->second;
-}
-
-static void CloseShaFd(int32_t fd) {
-    std::lock_guard<std::mutex> lock(g_shaMutex);
-    g_shaHandles.erase(fd);
-}
-
 struct ISFSFileStats {
     uint32_t length;    // File size in bytes
     uint32_t position;  // Current file position
@@ -65,9 +27,7 @@ static constexpr uint32_t ES_IOCTL_GETDEVICEID = 0x07;
 static constexpr uint32_t ES_IOCTL_GETDEVICECERT = 0x1E;
 static constexpr uint32_t ES_IOCTL_GETTITLEID = 0x20;
 static constexpr uint32_t ES_IOCTL_SIGN = 0x30;
-static constexpr uint32_t SHA_IOCTL_INIT = 0;
-static constexpr uint32_t SHA_IOCTL_UPDATE = 1;
-static constexpr uint32_t SHA_IOCTL_FINAL = 2;
+static constexpr int32_t ES_EINVAL = -1017;  // IOS ES error: invalid argument
 
 static std::string ReadGuestCString(uint32_t address, size_t maxLength = 1024) {
     std::string text;
@@ -88,8 +48,6 @@ static std::string ReadGuestCString(uint32_t address, size_t maxLength = 1024) {
     }
     return text;
 }
-static constexpr uint32_t SHA_CONTEXT_SIZE = 0x1c;
-static constexpr uint32_t SHA_DIGEST_SIZE = 0x14;
 
 // Same guest layout as the /dev/net ioctlv descriptors; see runtime_parse_helpers.h.
 using IosVector = RuntimeHle::IoVector;
@@ -104,90 +62,8 @@ static uint64_t CurrentMkwTitleId() {
     return (static_cast<uint64_t>(kNandTitleIdHi) << 32) | low;
 }
 
-static bool WriteGuestBytes(uint32_t address, uint32_t size, const uint8_t* data, size_t dataSize) {
-    if (address == 0 || size < dataSize || !Memory::Contains(address, dataSize)) {
-        return false;
-    }
-    uint8_t* out = Memory::GetPointer(address, dataSize);
-    std::memcpy(out, data, dataSize);
-    return true;
-}
-
 static bool IsValidGuestRange(uint32_t address, uint32_t size) {
     return size == 0 || (address != 0 && Memory::Contains(address, size));
-}
-
-static bool WriteShaOutputs(const ShaHandle& handle, const IosVector& context, const IosVector& hash) {
-    CryptoPP::SHA1 snapshot = handle.hash;
-    std::array<uint8_t, CryptoPP::SHA1::DIGESTSIZE> digest{};
-    snapshot.Final(digest.data());
-    if (!WriteGuestBytes(hash.address, hash.size, digest.data(), digest.size())) {
-        return false;
-    }
-
-    if (context.address != 0 && context.size >= SHA_CONTEXT_SIZE && Memory::Contains(context.address, SHA_CONTEXT_SIZE)) {
-        Memory::Write32(context.address + 0x00, 0x67452301u);
-        Memory::Write32(context.address + 0x04, 0xEFCDAB89u);
-        Memory::Write32(context.address + 0x08, 0x98BADCFEu);
-        Memory::Write32(context.address + 0x0c, 0x10325476u);
-        Memory::Write32(context.address + 0x10, 0xC3D2E1F0u);
-        const uint64_t bitCount = handle.byteCount * 8u;
-        Memory::Write32(context.address + 0x14, static_cast<uint32_t>(bitCount >> 32));
-        Memory::Write32(context.address + 0x18, static_cast<uint32_t>(bitCount));
-    }
-
-    return true;
-}
-
-static int32_t HandleShaIoctlv(int32_t fd, uint32_t cmd, uint32_t numIn, uint32_t numOut, uint32_t vectorPtr) {
-    if (!vectorPtr || !Memory::Contains(vectorPtr, static_cast<size_t>(numIn + numOut) * 8u)) {
-        return ISFS_EINVAL;
-    }
-    if (numIn != 1 || numOut != 2) {
-        LogNandWarning("IOS_Ioctlv", "/dev/sha unsupported vector shape cmd=%u numIn=%u numOut=%u",
-                cmd, numIn, numOut);
-        return ISFS_EINVAL;
-    }
-
-    ShaHandle* handle = GetShaHandle(fd);
-    if (!handle) {
-        return ISFS_EINVAL;
-    }
-
-    const IosVector input = ReadIosVector(vectorPtr, 0);
-    const IosVector context = ReadIosVector(vectorPtr, 1);
-    const IosVector hash = ReadIosVector(vectorPtr, 2);
-    if (!IsValidGuestRange(input.address, input.size) ||
-        context.size < SHA_CONTEXT_SIZE || hash.size < SHA_DIGEST_SIZE ||
-        !IsValidGuestRange(context.address, SHA_CONTEXT_SIZE) ||
-        !IsValidGuestRange(hash.address, SHA_DIGEST_SIZE)) {
-        LogNandWarning("IOS_Ioctlv",
-                "/dev/sha invalid buffers cmd=%u in=0x%08X/%u ctx=0x%08X/%u hash=0x%08X/%u",
-                cmd, input.address, input.size, context.address, context.size, hash.address, hash.size);
-        return ISFS_EINVAL;
-    }
-
-    if (cmd == SHA_IOCTL_INIT) {
-        handle->Restart();
-    } else if (cmd != SHA_IOCTL_UPDATE && cmd != SHA_IOCTL_FINAL) {
-        LogNandWarning("IOS_Ioctlv", "/dev/sha unsupported cmd=%u", cmd);
-        return ISFS_EINVAL;
-    }
-
-    if (input.size != 0) {
-        const uint8_t* bytes = Memory::GetPointer(input.address, input.size);
-        handle->hash.Update(bytes, input.size);
-        handle->byteCount += input.size;
-    }
-
-    if (!WriteShaOutputs(*handle, context, hash)) {
-        return ISFS_EINVAL;
-    }
-
-    if (cmd == SHA_IOCTL_FINAL) {
-        handle->Restart();
-    }
-    return ISFS_OK;
 }
 
 // ---- OPUC: OPUC_TRACE_NAND=1 logs every IOS call into the NAND/ISFS HLE with its path, command and result ----
@@ -281,10 +157,6 @@ static int32_t NAND_IOS_Open_Impl(uint32_t pathPtr, uint32_t mode) {
         if (std::strcmp(path, "/dev/es") == 0) {
             return ES_DEV_FD;
         }
-        if (std::strcmp(path, "/dev/sha") == 0) {
-            const int32_t fd = AllocateShaFd();
-            return fd;
-        }
         if (const int32_t kdFd = KD_HLE_OpenDevice(path)) {
             return kdFd;
         }
@@ -344,10 +216,6 @@ static int32_t NAND_IOS_Close_Impl(uint32_t fd) {
         return ISFS_OK;
     }
     if (fd == ES_DEV_FD) {
-        return ISFS_OK;
-    }
-    if (GetShaHandle(static_cast<int32_t>(fd))) {
-        CloseShaFd(static_cast<int32_t>(fd));
         return ISFS_OK;
     }
     if (KD_HLE_IsFd(fd)) {
@@ -467,10 +335,6 @@ static int32_t NAND_IOS_Ioctl_Impl(
         return KD_HLE_Ioctl(fd, cmd, inBufPtr, inLen, outBufPtr, outLen);
     }
 
-    if (GetShaHandle(static_cast<int32_t>(fd))) {
-        LogNandWarning("IOS_Ioctl", "/dev/sha does not support scalar ioctl cmd=%u", cmd);
-        return ISFS_EINVAL;
-    }
     if (Bluetooth_HLE_IsFd(fd)) {
         LogNandWarning("IOS_Ioctl", "/dev/usb/oh1 does not support scalar ioctl cmd=%u", cmd);
         return -4;
@@ -860,9 +724,6 @@ static int32_t NAND_IOS_Ioctlv_Impl(
         return Bluetooth_HLE_Ioctlv(fd, cmd, numIn, numOut, vectorPtr);
     }
 
-    if (GetShaHandle(static_cast<int32_t>(fd))) {
-        return HandleShaIoctlv(static_cast<int32_t>(fd), cmd, numIn, numOut, vectorPtr);
-    }
 
 
     if (fd == ISFS_DEV_FD) {
@@ -881,30 +742,14 @@ static int32_t NAND_IOS_Ioctlv_Impl(
         }
 
         switch (cmd) {
-            case ES_IOCTL_GETDEVICEID: {
-                if (numIn != 0 || numOut != 1) {
-                    return ISFS_EINVAL;
-                }
-                const IosVector out = ReadIosVector(vectorPtr, 0);
-                if (out.size < 4 || out.address == 0 || !Memory::Contains(out.address, 4)) {
-                    return ISFS_EINVAL;
-                }
-                const WiiEsCrypto::Identity& identity = WiiEsCrypto::CurrentIdentity();
-                Memory::Write32(out.address, identity.deviceId);
-                return ISFS_OK;
-            }
-
-            case ES_IOCTL_GETDEVICECERT: {
-                if (numIn != 0 || numOut != 1) {
-                    return ISFS_EINVAL;
-                }
-                const IosVector out = ReadIosVector(vectorPtr, 0);
-                const auto cert = WiiEsCrypto::GetDeviceCertificate();
-                if (!WriteGuestBytes(out.address, out.size, cert.data(), cert.size())) {
-                    return ISFS_EINVAL;
-                }
-                return ISFS_OK;
-            }
+            // Device identity and signing need the console's ECC keys. OPUC never asks for them (its ES library is
+            // ESP_InitLib / CloseLib / GetDataDir / GetTitleId, answered in esp.cpp; vault entities/boot-flow), so
+            // they are not emulated: a request is reported and refused.
+            case ES_IOCTL_GETDEVICEID:
+            case ES_IOCTL_GETDEVICECERT:
+            case ES_IOCTL_SIGN:
+                LogNandWarning("IOS_Ioctlv", "/dev/es cmd=0x%X (device identity / signing) is not emulated", cmd);
+                return ES_EINVAL;
 
             case ES_IOCTL_GETTITLEID: {
                 if (numIn != 0 || numOut != 1) {
@@ -917,27 +762,6 @@ static int32_t NAND_IOS_Ioctlv_Impl(
                 const uint64_t titleId = CurrentMkwTitleId();
                 Memory::Write32(out.address, static_cast<uint32_t>(titleId >> 32));
                 Memory::Write32(out.address + 4u, static_cast<uint32_t>(titleId));
-                return ISFS_OK;
-            }
-
-            case ES_IOCTL_SIGN: {
-                if (numIn != 1 || numOut != 2) {
-                    return ISFS_EINVAL;
-                }
-                const IosVector in = ReadIosVector(vectorPtr, 0);
-                const IosVector sigOut = ReadIosVector(vectorPtr, 1);
-                const IosVector certOut = ReadIosVector(vectorPtr, 2);
-                if (in.address == 0 || !Memory::Contains(in.address, in.size)) {
-                    return ISFS_EINVAL;
-                }
-                const uint8_t* input = Memory::GetPointer(in.address, in.size);
-                WiiEsCrypto::EcSignature signature{};
-                WiiEsCrypto::EccCert cert{};
-                WiiEsCrypto::Sign(CurrentMkwTitleId(), input, in.size, signature, cert);
-                if (!WriteGuestBytes(sigOut.address, sigOut.size, signature.data(), signature.size()) ||
-                    !WriteGuestBytes(certOut.address, certOut.size, cert.data(), cert.size())) {
-                    return ISFS_EINVAL;
-                }
                 return ISFS_OK;
             }
 

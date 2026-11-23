@@ -14,7 +14,6 @@
 #include "hle/wc24/kd_offline.h"
 #include "runtime_config.h"
 #include "runtime_product.h"
-#include "wii_es_crypto.h"
 
 #include <algorithm>
 #include <cstdarg>
