@@ -393,14 +393,11 @@ void SystemBridge::WriteGuestMemorySnapshot(std::ostream& os, const std::filesys
         writeRegion("MEM1", kMem1Base, kMem1Size, mem1Path);
     }
     constexpr uint32_t kMem2Base = 0x90000000u;
-    for (uint32_t mem2Size : {0x08000000u, 0x04000000u}) {
-        if (!Memory::Contains(kMem2Base, mem2Size)) {
-            continue;
-        }
+    constexpr uint32_t kMem2Size = static_cast<uint32_t>(Memory::kMem2Size);
+    if (Memory::Contains(kMem2Base, kMem2Size)) {
         std::filesystem::path mem2Path = mem1Path;
         mem2Path += ".mem2";
-        writeRegion("MEM2", kMem2Base, mem2Size, mem2Path);
-        break;
+        writeRegion("MEM2", kMem2Base, kMem2Size, mem2Path);
     }
 }
 
@@ -466,9 +463,8 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
     constexpr uint32_t kMem2LoFloor = 0x90000800u;
     // Reserve enough guest memory for the runtime-built DVD FST.
     constexpr uint32_t kDvdFstReserveSize = 0x200000u;
-    // IOS36 reserves 128 KiB for IPC immediately below a 128 KiB IOS-owned
-    // block. Dolphin's RAM override preserves both sizes and moves them to the
-    // top of the expanded MEM2 mapping.
+    // 128 KiB for IPC immediately below a 128 KiB IOS-owned block, both at the
+    // top of MEM2 (the layout of Dolphin's RAM override).
     constexpr uint32_t kIPCArenaSize = 0x20000u;
     constexpr uint32_t kIosReservedSize = 0x20000u;
 
@@ -516,7 +512,7 @@ void SystemBridge::SeedLowMemDefaults(const Memory::Config& config) {
         entries.push_back({0x80003128u, mem2ArenaHi, "MEM2 arena hi", true});
         entries.push_back({0x80003130u, ipcBufLo, "IPC Buffer lo", true});
         entries.push_back({0x80003134u, ipcBufHi, "IPC Buffer hi", true});
-        entries.push_back({0x80003138u, 0x00000002u, "Hollywood revision", true});
+        entries.push_back({0x80003138u, 0x00000011u, "Hollywood revision (retail)", true});
         entries.push_back({0x80003148u, iosReservedLo, "IOS reserved lo", true});
         entries.push_back({0x8000314Cu, physicalMem2End, "IOS reserved hi", true});
     }

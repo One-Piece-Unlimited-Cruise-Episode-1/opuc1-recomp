@@ -342,8 +342,8 @@ inline bool ApplyIndexedXfArrayForPacket(uint8_t cmd, uint32_t value) {
 
 // --- Render state ---------------------------------------------------------
 
-// Draw paths that bypass the guest's own GXSetAlphaCompare (raw FIFO packets,
-// synthesized lyt quads) must not inherit whatever aurora happened to hold.
+// Draw paths that bypass the guest's own GXSetAlphaCompare (raw FIFO packets)
+// must not inherit whatever aurora happened to hold.
 inline void EnsureDefaultGxAlphaCompare() {
     if (g_alphaCompareValid) {
         return;

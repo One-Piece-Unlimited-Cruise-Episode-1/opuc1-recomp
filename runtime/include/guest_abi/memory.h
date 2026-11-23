@@ -12,7 +12,7 @@ public:
     using DeferredReadCallback = bool (*)(void* user);
 
     static constexpr size_t kMem1Size = 24u * 1024u * 1024u;
-    static constexpr size_t kMem2Size = 128u * 1024u * 1024u;
+    static constexpr size_t kMem2Size = 64u * 1024u * 1024u;  // retail Wii
     static constexpr uint32_t kMem1PhysicalBase = 0x00000000u;
     static constexpr uint32_t kMem1CachedBase = 0x80000000u;
     static constexpr uint32_t kMem1UncachedBase = 0xC0000000u;

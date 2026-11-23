@@ -149,8 +149,8 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   bloom" option and `[video] disabled_post_processing_paths`), the Mii library pump (`RFLiIsWorking`) and the
   `RFL_Res.dat` FaceLib seeding with its U8 reader. OPUC links neither EGG nor RFL (vault `entities/main-dol-layout`).
   Every removed hook was `OPUC_UNBOUND` or keyed to an `OPUC_TODO` address, so translation output did not change.
-  Unbound generic SDK accessors (SC Bluetooth/WPAD items, SC product/serial, the nw4r::lyt quad path) stay until a
-  Ghidra check rebinds or rules them out.
+  Unbound generic SDK accessors (SC Bluetooth/WPAD items, SC product/serial) stay until a Ghidra check rebinds or rules
+  them out.
 - GameCube pad stack removed (2026-11-23): the game reads only KPAD, so the PAD emulation behind PADRead, the
   per-player GameCube mapping, keyboard-to-pad bindings, Dolphin input expressions (GCPadNew.ini import) and motion
   tricks are gone, with their config keys and tests. A traced run showed the game calling PADReset(0xF0000000) once at
@@ -166,6 +166,15 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   app's controller layout (`steam://forceinputappid/480`) while the window has focus, and the `[controller]`
   `steam_input_override` / `steam_input_app_id` keys are gone (old keys in a `Config.toml` are ignored), as is
   the overlay's unused Valve-controller check.
+- Layout fast path and development-kit setup removed (2026-11-23):
+  - gx_dl.cpp's nw4r::lyt DrawQuad fast path was never registered (both hooks `OPUC_UNBOUND`), so it is gone. If OPUC
+    links layout code under another name, the translated code still draws it.
+  - The runtime is now a retail console: 64 MiB MEM2 (was 128 MiB, an NDEV size), Hollywood revision 0x11 and
+    OSGetConsoleType 0x21 (was 0x10000012). The game's ReportOSInfo prints "Retail 33" and "Memory 88 MB"; the MEM2
+    arena is 0x90000800-0x93dc0000.
+  - What the dev-kit bit changed: ReportOSInfo's text, UART init and a dev-only OSLaunchTitle branch (vault
+    `entities/main-dol-layout`).
+  - The one retail-only check, `__DVDCheckDevice`, is HLE'd to return 1, as are __write_console and OSReport.
 - Mario Kart test suites and checks removed (2026-11-23):
   - `mkw_fiber_manager_tests`: it drove the scheduler through Mario Kart addresses (`__OSUnlockAllMutex` 801A8088,
     `OSExitThread` 801AA0F0, `EGG::Thread::Run` 8024373C) in a 4 MiB fixture, which no longer holds OPUC's scheduler

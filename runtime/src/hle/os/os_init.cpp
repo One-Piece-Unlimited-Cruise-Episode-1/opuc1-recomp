@@ -114,22 +114,20 @@ extern "C" uint32_t OS____InitMemoryProtection_801a7dfc(uint32_t r3, uint32_t r4
 
 PPC_NATIVE_OVERRIDE(80272AC0 /*mkw:801A7DFC*/, OS____InitMemoryProtection_801a7dfc, uint32_t, (uint32_t r3, uint32_t r4, uint32_t r5, uint32_t r6, uint32_t r7, uint32_t r8), (r3, r4, r5, r6, r7, r8));
 
-// OSGetConsoleType (0x8019f33c): standard Wii = 0x12, NDEV (expanded MEM2) = 0x10000012;
-// MKWii uses the NDEV result to enable its extra-memory heap path.
+// OSGetConsoleType: always a retail console. The game's own function would return 0x21 for the seeded
+// retail Hollywood revision 0x11 and 64 MiB MEM2 (0x80003138 / 0x80003118); the dev-kit bit 0x10000000 only switches
+// ReportOSInfo's text, the UART init (its output is HLE'd anyway) and a dev-only branch of the OSLaunchTitle
+// path (vault entities/main-dol-layout).
 extern "C" uint32_t OS__GetConsoleType_8019f33c(uint32_t /*r4*/, uint32_t /*r5*/, uint32_t /*r6*/,
                                                 uint32_t /*r7*/, uint32_t /*r8*/, uint32_t /*r31*/)
 {
-    constexpr uint32_t kRetailMem2Size = 64u * 1024u * 1024u;
-    const uint32_t physicalMem2Size = Memory::Read32(0x80003118u);
-    const uint32_t consoleType =
-        physicalMem2Size == kRetailMem2Size ? 0x00000012u : 0x10000012u;
+    constexpr uint32_t kRetailConsoleType = 0x00000021u;
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true)) {
-        RT_LOG(RT_TAG_OS) << "OSGetConsoleType: MEM2="
-                  << (physicalMem2Size / (1024u * 1024u))
-                  << " MB, returning 0x" << std::hex << consoleType << std::dec << std::endl;
+        RT_LOG(RT_TAG_OS) << "OSGetConsoleType: returning 0x" << std::hex << kRetailConsoleType << std::dec
+                          << " (retail)" << std::endl;
     }
-    return consoleType;
+    return kRetailConsoleType;
 }
 
 // Register the function
