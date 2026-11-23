@@ -66,16 +66,10 @@ int main() {
                      "legacy force_16_9 overrode force_aspect")) return 1;
     }
     {
-        std::istringstream input("[controller]\nsteam_input_override = false\nsteam_input_app_id = 1234\n");
-        const RuntimeUserConfig config = RuntimeConfigFile::ParseConfig(input, "steam.toml");
-        if (!Require(config.steamInputOverride == std::optional<bool>{false} &&
-                         config.steamInputAppId == std::optional<uint32_t>{1234},
-                     "Steam Input settings were not loaded")) return 1;
-    }
-    {
-        std::istringstream input("[controller]\nsteam_input_app_id = 0\n");
-        const RuntimeUserConfig config = RuntimeConfigFile::ParseConfig(input, "steam-zero.toml");
-        if (!Require(!config.steamInputAppId, "zero Steam Input app id was accepted")) return 1;
+        std::istringstream input("[video]\nwindow_width = 0\nwindow_height = 720\n");
+        const RuntimeUserConfig config = RuntimeConfigFile::ParseConfig(input, "window-zero.toml");
+        if (!Require(!config.windowWidth && config.windowHeight == std::optional<uint32_t>{720},
+                     "zero window width was accepted")) return 1;
     }
     if (!SetsFps("[video]\nshow_fps = false\n", "bare key was not replaced")) return 1;
     if (!SetsFps("[video]\n\"show_fps\" = false\n", "basic-quoted key was not replaced")) return 1;

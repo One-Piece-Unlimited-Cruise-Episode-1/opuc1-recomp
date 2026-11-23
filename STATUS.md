@@ -77,7 +77,7 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
    more than one address; single-address false matches are still possible, so each library batch confirms its
    bindings in Ghidra.
 7. Strip what is left of the inherited Mario Kart extras: real Wii Remote support (Bluetooth host, pairing,
-   L2CAP/HID/SDP link), the Steam Input override.
+   L2CAP/HID/SDP link).
 8. M4b: serve the disc from `data/opuc1.iso` with nod (aurora already fetches it for `aurora_dvd`): open the DATA
    partition, publish its FST at 0x80000038, read files through `nod_partition_open_file`.
 
@@ -162,6 +162,10 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   answered in esp.cpp. So the vendored Crypto++, the keys.bin identity, the /dev/sha device and ES device-ID /
   device-certificate / signing are gone; those three ES requests are refused with ES_EINVAL (-1017) and logged as
   "not emulated". /dev/es itself still opens and answers GETTITLEID.
+- Steam Input override removed (2026-11-23): the runtime no longer asks a running Steam client to apply another
+  app's controller layout (`steam://forceinputappid/480`) while the window has focus, and the `[controller]`
+  `steam_input_override` / `steam_input_app_id` keys are gone (old keys in a `Config.toml` are ignored), as is
+  the overlay's unused Valve-controller check.
 - Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): 20 of 21 pass (three GameCube-pad test
   targets went with the stack). `mkw_system_bridge_tests` used
   to expect Mario Kart constructor tables (DOL + StaticR.rel); it now checks that the runtime runs no constructor itself

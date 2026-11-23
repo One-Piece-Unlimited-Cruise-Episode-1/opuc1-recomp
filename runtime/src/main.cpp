@@ -68,7 +68,6 @@
 #include "aurora_events.h"
 #include "wiimote_host.h"
 #include "discord_presence.h"
-#include "steam_input_layout.h"
 #include "fiber_manager.h"
 #include "gx_worker.h"
 #include "hle_stubs.h"
@@ -1099,7 +1098,6 @@ LONG ReportFatalSehAndExit(EXCEPTION_POINTERS* info) {
                      << " at host address 0x" << record->ExceptionInformation[1];
     }
     popupDetails << ".\n\nThe process transcript and crash log contain the full CPU and stack diagnostics.";
-    SteamInputLayout::Release();
     ShowRuntimeFatalPopup("a native crash occurred", popupDetails.str());
     DumpHostStackTrace();
 
@@ -1200,7 +1198,6 @@ void PosixMemoryFaultHandler(int sig, siginfo_t* info, void* ucontextVoid) {
     }
     popupDetails << ".\n\nThe process transcript and crash log contain the full CPU and stack "
                     "diagnostics.";
-    SteamInputLayout::Release();
     ShowRuntimeFatalPopup("a native crash occurred", popupDetails.str());
     DumpHostStackTrace();
     WriteFatalLogImpl(sig == SIGBUS ? "sigbus" : "sigsegv");
@@ -1234,7 +1231,6 @@ void AbortSignalHandler(int signum) {
     // abort() bypasses atexit, so the guest-memory fault summary has to be
     // emitted here too. It is idempotent, so a later AtExitHandler is a no-op.
     GuestFlat::LogFaultSummary();
-    SteamInputLayout::Release();
 
     ShowRuntimeFatalPopup("a fatal internal error occurred",
                           "The process called abort while running the game or Aurora renderer.\n\n"
@@ -1270,7 +1266,6 @@ void SetRuntimeExitCode(int code) {
 
 // Global handler called via atexit() to flush buffers before any exit
 static void AtExitHandler() {
-    SteamInputLayout::Release();
     // End-of-run guest memory report. This runs before the fatal-report check
     // below because the counters describe the whole session and are just as
     // interesting after a crash as after a clean exit.
@@ -1295,7 +1290,6 @@ static void AtExitHandler() {
 
 // Global terminate handler for uncaught exceptions
 static void TerminateHandler() {
-    SteamInputLayout::Release();
     // Skip detailed dump if already reported
     if (g_fatalErrorReported.load(std::memory_order_acquire)) {
         std::fflush(stderr);
@@ -1484,10 +1478,6 @@ int RuntimeMain(int argc, char** argv) {
         UpdateMkwDynamicAspectSurface(auroraInfo.windowSize.native_fb_width,
                                       auroraInfo.windowSize.native_fb_height);
         settings_overlay::InitializeRuntimeSettings();
-        if (!g_headless) {
-            SteamInputLayout::Initialize(RuntimeConfigFile::SteamInputOverrideEnabled(),
-                                         RuntimeConfigFile::SteamInputAppId());
-        }
         RT_LOG(RT_TAG_CONFIG) << "video.widescreen=" << (configWidescreen ? "true" : "false")
                   << " force_aspect=" << (forceAspect ? "true" : "false")
                   << " SCGetAspectRatio=" << (configWidescreen ? 1 : 0)
@@ -1530,7 +1520,6 @@ int RuntimeMain(int argc, char** argv) {
         Fiber::GuestFiberManager::Shutdown();
         WindowPlacementPersistence::Flush(true);
         Wiimote::Shutdown();
-        SteamInputLayout::Release();
         GxWorker::Stop();
         aurora_shutdown();
         DiscordPresence::Shutdown();
@@ -1545,7 +1534,6 @@ int RuntimeMain(int argc, char** argv) {
                 << " len=0x" << ex.length()
                 << std::dec << std::nouppercase
                 << " reason=" << ex.reason();
-        SteamInputLayout::Release();
         ShowRuntimeFatalPopup("a guest memory access was out of bounds", details.str());
         WriteFatalLogImpl("access_violation", details.str());
         SetRuntimeExitCodeImpl(1);
@@ -1560,7 +1548,6 @@ int RuntimeMain(int argc, char** argv) {
     } catch (const std::exception& ex) {
         std::cerr << "Runtime error: " << ex.what() << std::endl;
         SystemBridge::DumpCpuState(TryGetCpuContext());
-        SteamInputLayout::Release();
         ShowRuntimeFatalPopup("a runtime exception occurred", ex.what());
         WriteFatalLogImpl("exception");
         SetRuntimeExitCodeImpl(1);

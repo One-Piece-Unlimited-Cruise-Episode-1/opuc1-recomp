@@ -1,7 +1,6 @@
 #pragma once
 
 #include "settings_overlay.h"
-#include "steam_input_layout.h"
 #include "runtime_config.h"
 #include "gx_worker.h"
 #include "perf_stats.h"
@@ -59,7 +58,6 @@ inline void Flush(bool force = false) {
 // process directly and do not run the crash/atexit paths.
 [[noreturn]] inline void ExitForAuroraWindowClose() noexcept {
     settings_overlay::ReleaseControllers();
-    SteamInputLayout::Release();
     WindowPlacementPersistence::Flush(true);
 #if defined(_WIN32)
     ::ExitProcess(0);
@@ -116,7 +114,6 @@ inline void ProcessAuroraEvents(const AuroraEvent* events) {
         g_mkwDynamicAspectSurfacePending.store(true, std::memory_order_release);
     }
     settings_overlay::HandleEvents(events);
-    SteamInputLayout::HandleEvents(events);
 }
 
 inline void ApplyPendingMkwDynamicAspectSurface() {

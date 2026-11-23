@@ -884,18 +884,6 @@ void DrawTopBar() {
     ImGui::EndMainMenuBar();
 }
 
-// Steam's desktop layout maps B to Escape on Valve controllers.
-bool ValveControllerConnected() {
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
-    bool found = false;
-    for (int i = 0; ids != nullptr && i < count && !found; ++i) {
-        found = SDL_GetJoystickVendorForID(ids[i]) == 0x28DE && SDL_GetJoystickProductForID(ids[i]) != 0x11FF;
-    }
-    SDL_free(ids);
-    return found;
-}
-
 bool IsToggleKey(const SDL_Event& event, SDL_Scancode code) {
     return event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.scancode == code;
 }

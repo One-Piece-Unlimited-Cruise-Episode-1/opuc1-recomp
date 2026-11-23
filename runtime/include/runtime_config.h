@@ -72,10 +72,6 @@ struct RuntimeUserConfig {
     std::optional<int32_t> wiiIrSensitivity;
     std::optional<int32_t> wiiSpeakerVolume;
     std::optional<bool> wiiRumble;
-    // Outside a Steam launch, ask a running Steam client for a game controller layout while
-    // the window has focus instead of its desktop one (buttons bound to mouse and keyboard).
-    std::optional<bool> steamInputOverride;
-    std::optional<uint32_t> steamInputAppId;
     std::optional<bool> discordPresenceEnabled;
     // The application ID of the Discord application for Rich Presence; presence stays off without one.
     std::optional<std::string> discordClientId;
@@ -304,8 +300,7 @@ inline void EnsureConfigFile() {
               "# thread exactly as the runtime did before.\n"
               "mix_worker = true\n\n"
               "[controller]\n"
-              "steam_input_override = true\n"
-              "# steam_input_app_id = 480\n\n"
+              "\n"
               "[discord]\n"
               "# Rich Presence talks only to a locally-running Discord client.\n"
               "# Off until client_id is set: put a Discord application ID there\n"
@@ -462,10 +457,6 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
         config.wiiSpeakerVolume = *value;
     }
     config.wiiRumble = FindConfigValue<bool>(document, "controller", "wii_rumble");
-    config.steamInputOverride = FindConfigValue<bool>(document, "controller", "steam_input_override");
-    if (const auto value = FindConfigUint(document, "controller", "steam_input_app_id"); value && *value != 0) {
-        config.steamInputAppId = *value;
-    }
     config.discordPresenceEnabled = FindConfigValue<bool>(document, "discord", "enabled");
     config.discordClientId = FindConfigValue<std::string>(document, "discord", "client_id");
 
@@ -827,15 +818,6 @@ inline bool SetWiiRemotesEnabled(bool value) {
     if (!WriteSetting("controller", "wii_remotes", value ? "true" : "false")) return false;
     Mutable().wiiRemotes = value;
     return true;
-}
-
-inline bool SteamInputOverrideEnabled(bool fallback = true) {
-    return Get().steamInputOverride.value_or(fallback);
-}
-
-// Spacewar, Valve's Steamworks sample app, available to every Steam account.
-inline uint32_t SteamInputAppId(uint32_t fallback = 480) {
-    return Get().steamInputAppId.value_or(fallback);
 }
 
 inline bool WiiAutoPairEnabled(bool fallback = true) {
