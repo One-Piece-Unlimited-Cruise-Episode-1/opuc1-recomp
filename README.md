@@ -1,3 +1,5 @@
+<img width="1651" height="430" alt="One Piece: Unlimited Recompilation Episode 1" src="docs/banner.png" />
+
 # One Piece: Unlimited Recompilation Episode 1
 
 <p align="center">
@@ -140,7 +142,7 @@ dotnet test translator/Translator.sln -c Release
 | `projects/mkwii-reference/MAP.txt` | reference SDK symbol map, used only to rebind the runtime's SDK addresses |
 | `tools/` | build, run, map, rebind and status scripts (developer checkout) |
 | `launcher/` | the player setup and launcher: disc check, local build with a bundled toolchain, install, launch |
-| `docs/` | design notes ([reference-study.md](docs/reference-study.md)) |
+| `docs/` | design notes ([reference-study.md](docs/reference-study.md)) and the README banner |
 | `generated/`, `build/` | outputs, never committed: they contain translated game code |
 
 ## FAQ
