@@ -231,7 +231,7 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
     copies of some names); Freeze enemies (EnemyManager +0xE held at 1, what EnemyStop(true) writes); Invincible
     (`PlayStatus::SetCurrent` 804d8da0 wrapped: a lower value for the leader's HP is refused); Infinite SP (leader SP
     current kept at its max each frame, from KPADRead); Wii button art (`[game] pc_button_art` off); State text (an
-    ImGui corner readout: move state, HP, SP, position).
+    ImGui corner readout: move state, HP, SP, position); Enemy AI view (a sub-list, see the Enemy AI view entry).
   - Flags: the bank-1 records found by walking the bank (`*(0x805E8B04)`, nodes {next, name, size, data}):
     EventFlag, EventScriptEndFlag, EventFuncEnableFlag, EventFuncEndFlag (set ids plus the ones seen this session),
     GameData +4 shortcut bits, the StelePointList flags (& 3), GameData +0xB344 boss bits (table 8050cb70); A flips
@@ -251,6 +251,44 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   auto-hook landed the fish; a 0.97 bar cast passed the 100 m line (100.4 m) without the snap; the Remote graph drew.
   Not checked: Freeze with enemies on screen (no enemy group near the test spots); showhit, event_test, no_enemy and
   the Break Rush flags in play (they only reach the game's own checks).
+- Enemy AI view (2026-11-26, not in the game; `hle/opuc/ai_view.cpp`, names in `ai_view_names.h`, label font in
+  `ai_view_font.h`). Dev > Debug > Enemy AI view opens a sub-list: View (master), Mob rings, Group rings, Boss rings,
+  Target lines, Labels, Through walls, Inspector, Planner, Decision log, Timeline. `OPUC_AI_VIEW=1` switches it on at
+  start (`=marks` without the panels), `OPUC_TRACE_AI=1` writes every decision to the log, `OPUC_AI_TOGGLE_TEST=N` flips
+  the view every N frames, `OPUC_AI_DUMP_TRANSITIONS=1` dumps the mob transition lists once, `OPUC_AI_TEST_BOSS_HP=P`
+  sets a planner owner's HP to P % once through `PlayStatus::SetCurrent` (to reach HP conds in a test).
+  - Mobs (EnemyAction state machine): the 43 transition conds called by `RunTransitions` 801b6d90 are wrapped (the cond
+    pointers the lists at 805ECD50 hold, mostly 4-byte thunks): each result, and a `RandMT::NextU32` roll made while a
+    cond runs, against the chance from the working EnemyAIData row (EnemyFactory +0x124). The snapshot walks
+    EnemyManager +0x30 / +0x38 groups and their members (both in MEM2).
+  - Bosses and CPU crew (UtilAi planner): `UtilAi::Tick` 8000d41c, the 12 scorer functions (f1 = score(node, ctx)),
+    `SetStage` 800117c4, `EvalAdvCond` 800106b8, attack Enter / Exit 80016384 / 80017e48 and `EmitAttackSlotInput`
+    8000edd0 are wrapped. The behaviour list is scored about every third tick (UtilAi +0x68); each node keeps its last
+    score.
+  - In-game marks: one ALPrim3D (type 0, GX triangles, cap 10000 vertices) created from inside the field update (the
+    group range test 801b3998 and the planner tick call the frame hook) while the current screen's camera is the field
+    camera, rebuilt every frame (ClearVertices, BeginAdd, AddVertexColorF per vertex, EndAdd), Z write off, Z test on
+    unless Through walls, released with KillDeferred when the view turns off and dropped when the field camera changes.
+    Mob rings (near, sidestep, attack kinds 0-2, r = EnemyBaseData radius; filled while the perception bit is set), the
+    45-degree facing cone, the target line in the state's colour, the home point and the leash line; group encount /
+    setup / chase rings (lit by group +0x20); boss mov layers (orbit, approach, speed, evade) in the Character editor's
+    colours and the scored slot's range band; labels as camera-facing stroke text (ALCamera +0x104 view rows).
+  - Panels (ImGui): the nearest mob's state, perception bits, every transition of its state with this frame's result
+    and roll; the planner's stage strip (stages 0..n, the current one filled), the owner's HP %, the scale profile
+    (UtilAiStage +0x17C) and every cond row (UtilAiStage +0x560 / +0x564, 0x2C each) as a sentence, HP rows evaluated
+    now, rows of another stage or profile dimmed; the behaviour scores with the winner and the ScoreExecute checks of
+    each attack slot (target, row, recover, range, facing); a stage change is logged with the SetMoveStage row that
+    leads there; the decision log (repeats counted); the timeline (10 s of state bands).
+  Checked (2026-11-26, input scripts with screenshots, Fst group at 75.3 / 4.8 / 30.3 and the Kuma fight from the boss
+  tree, event 11300): the Dev rows switch; the log reads e.g. "LockOn: NoticeRandom yes, roll 0.20 < 0.70% -> Alert"
+  and the snapshot's state ids agree; rings, lines and labels draw at the mobs, hidden behind walls; at Kuma the
+  planner's winner is the behaviour that then runs (approach -> slot 0 at 0.50 with every check passing -> "slot 0
+  attack starts", "presses A" -> recover wait at 0.90), with the label and the slot's band; 40 on / off cycles reuse
+  the prim's memory (the same node / draw state addresses come back); with Freeze enemies on, the group spawned and no
+  decision was logged; with `OPUC_AI_TEST_BOSS_HP=40` Kuma's HP went 500 -> 200 and the log read "stage 0 -> 1 by cond
+  #1: HP% < 50 (HP now 40%)", the strip moved to 1 and the queued phase motion (0x2000, 1.10) won the next tick; his
+  stage-1 rows (profile mask 6) show "not this profile" at profile 0, and he stays in stage 1. Not checked: CPU crew
+  planners (none ran on Fst), frame identity with the view off (the wrappers only pass through then).
 - `runtime/src/hle/opuc/` holds OPUC-native HLE (`vi_opuc.cpp`: VIGetScanMode; `milestones.cpp`); the rebind tool skips it.
 - Offline runtime (2026-11-22): OPUC1 has no online features, so the inherited network HLE (sockets, SSL, DNS workers,
   IP top, NCD, deferred network IOS waits), Mbed TLS, the CA bundle, the WiiConnect24 NAND seed tree, the `[network]`

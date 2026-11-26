@@ -10,6 +10,7 @@
 //   Fishing  the fishing switches (fishing_pc.cpp), the spot table of this island, the fully upgraded rod.
 #include "dev_pages.h"
 
+#include "ai_view.h"
 #include "fishing_pc.h"
 #include "guest_call.h"
 #include "hle_stubs.h"
@@ -102,6 +103,15 @@ std::vector<Row> DebugRows(const CpuContext&) {
                          [](const CpuContext&) { RuntimeConfigFile::SetPcButtonArt(!RuntimeConfigFile::PcButtonArt(true)); }));
     rows.push_back(OnOff(u"State text", u"Not in the game: the move state / HP / position readout in the corner.", g_stateText,
                          [](const CpuContext&) { std::lock_guard<std::mutex> lock(g_mutex); g_stateText = !g_stateText; }));
+    {
+        Row r;
+        r.label = u"Enemy AI view";
+        r.desc = u"Not in the game: what each enemy’s AI looks at and picks (rings, lines, inspector, planner, log).";
+        r.value = OpucAiView::Get().view ? u"ON" : u"OFF";
+        r.rgb = OpucAiView::Get().view ? kOn : kOff;
+        r.open = OpucAiView::AiPage;
+        rows.push_back(r);
+    }
     return rows;
 }
 
@@ -634,6 +644,7 @@ extern "C" void OpucDev_RandNextU32(CpuContext* ctx) {
         return;
     }
     GuestFunctions::NextTranslation(0x803B4A70)(ctx);
+    OpucAiView::OnRand(ctx->gpr[3]);
 }
 REGISTER_NATIVE_WRAPPER_AS(0x803B4A70, OpucDev_RandNextU32, "OpucDev_RandNextU32");
 
@@ -644,6 +655,7 @@ void OpucDev_DrawOverlays() {
     constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration |
                                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoInputs |
                                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings;
+    OpucAiView::DrawPanels();
     const std::string state = OpucDev::StateText();
     if (!state.empty()) {
         ImGui::SetNextWindowPos(ImVec2(10, 40), ImGuiCond_Always);
