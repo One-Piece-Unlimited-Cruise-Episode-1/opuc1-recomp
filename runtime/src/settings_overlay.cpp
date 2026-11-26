@@ -45,6 +45,8 @@ extern "C" void PAD_HLE_SetRumbleEnabled(bool enabled);
 #include <aurora/aurora.h>
 #include <aurora/gfx.h>
 
+void OpucDev_DrawOverlays();  // hle/opuc/dev_pages.cpp: the Dev State text and Remote graph
+
 extern "C" int g_gxFrameCount;
 
 // Defined in runtime/src/hle/audio/ax_mix.cpp. That header is private to the HLE
@@ -857,6 +859,36 @@ void DrawTopBar() {
         ImGui::EndMenu();
     }
 
+    if (ImGui::BeginMenu("Game")) {
+        bool devMenu = RuntimeConfigFile::DevMenuEnabled(true);
+        if (ImGui::Checkbox("Dev entry in the pause menu", &devMenu)) {
+            RuntimeConfigFile::SetDevMenu(devMenu);
+        }
+        ImGui::TextDisabled("Cheats and debug pages (not in the game). Takes effect the next time the pause menu opens.");
+        ImGui::Separator();
+        ImGui::TextUnformatted("Fishing (PC)");
+        bool remoteInput = RuntimeConfigFile::FishingRemoteInput(false);
+        if (ImGui::Checkbox("Remote input (the mouse moves the Wii Remote)", &remoteInput)) {
+            RuntimeConfigFile::SetFishingRemoteInput(remoteInput);
+        }
+        ImGui::TextDisabled("Off: Simple input. Hold the left mouse button for the cast power bar, release to cast.");
+        bool assist = RuntimeConfigFile::FishingAssist(true);
+        if (ImGui::Checkbox("Assist HUD (power bar, predicted distance, lean track)", &assist)) {
+            RuntimeConfigFile::SetFishingAssist(assist);
+        }
+        bool pcGuide = RuntimeConfigFile::FishingPcGuide(true);
+        if (ImGui::Checkbox("PC control pictures (keys and mouse instead of the Wii Remote)", &pcGuide)) {
+            RuntimeConfigFile::SetFishingPcGuide(pcGuide);
+        }
+        ImGui::Separator();
+        bool pcArt = RuntimeConfigFile::PcButtonArt(true);
+        if (ImGui::Checkbox("PC button art (tutorials, prompts, menu help)", &pcArt)) {
+            RuntimeConfigFile::SetPcButtonArt(pcArt);
+        }
+        ImGui::TextDisabled("Pictures already loaded keep their art until the game loads them again.");
+        ImGui::EndMenu();
+    }
+
     const std::string audioLabel = g_audioMuted
         ? "Audio: Muted"
         : "Audio: " + std::to_string(g_audioVolumePercent) + "%";
@@ -1020,6 +1052,7 @@ void Draw() noexcept {
         DrawShaderCompilationStatus();
     }
     DrawFpsOverlay();
+    OpucDev_DrawOverlays();
     DrawTopBar();
     DrawExitPrompt();
     DrawRestartPrompt();

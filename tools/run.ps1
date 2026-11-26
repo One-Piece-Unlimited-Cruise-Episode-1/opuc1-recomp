@@ -1,5 +1,5 @@
 # Runs the recompiled OPUC1 executable for a bounded time and keeps its log.
-#   powershell -File tools/run.ps1 [-Seconds 20] [-Headless] [-Shot] [-ShotAt '10,14'] [-Exe <path>]
+#   powershell -File tools/run.ps1 [-Seconds 20] [-Headless] [-Shot] [-ShotAt '10,14'] [-Exe <path>] [-ConfigExtra <toml>]
 # Uses the portable layout of the runtime: build/native/portable.txt marks the root, so Config.toml, NAND,
 # cache and logs live in build/native/UserData. The disc is served from the extracted tree data/extract/DATA at the repo root
 # (paths.dvd_root); NAND saves go to build/native/UserData/nand. Output: build/logs/run.log.
@@ -8,7 +8,8 @@ param(
     [switch] $Headless,
     [switch] $Shot,          # capture the game window to build/logs/run.png right before the timeout
     [string] $ShotAt = '',   # extra captures at these seconds, e.g. '10,14.5,20' -> build/logs/run_<sec>.png
-    [string] $Exe = ''
+    [string] $Exe = '',
+    [string] $ConfigExtra = ''   # TOML appended to the generated Config.toml, e.g. "[game]`nfishing_pc_guide = false"
 )
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -49,7 +50,7 @@ $nand = (Join-Path $userData 'nand') -replace '\\', '/'
 [paths]
 dvd_root = "$dvd"
 nand_root = "$nand"
-"@ | Set-Content -Encoding utf8 (Join-Path $userData 'Config.toml')
+"@ + $(if ($ConfigExtra) { "`n" + $ConfigExtra + "`n" } else { '' }) | Set-Content -Encoding utf8 (Join-Path $userData 'Config.toml')
 
 $logs = Join-Path $root 'build/logs'
 New-Item -ItemType Directory -Force $logs | Out-Null

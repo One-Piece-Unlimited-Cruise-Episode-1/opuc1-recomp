@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>fishing glyph rows</title>
+<pre id="log">rendering…</pre>
+<script type="module">
+// The key rows of play/ui/pcguide.js build(), drawn alone (no panel, title or caption) at row top 0. The bindings are
+// the recompilation's fixed keyboard scheme (wiimote_opuc.cpp), the defaults of the Play tab's Fishing group:
+// cast / reel = left mouse, hook and the tools' swing = right mouse, lean A / D, raise W, the trap's press = E.
+import { arrow, burst, bindGlyph, glyphW } from './keyglyph.js';
+
+const W = 156, PAD = 8;
+const ROWS = [
+  { name: 'cast_hold', keys: [['Mouse0', 'LMB']] },
+  { name: 'cast_release', keys: [['Mouse0', 'LMB']], arrow: 'up' },
+  { name: 'hook', keys: [['Mouse2', 'RMB']], arrow: 'click' },
+  { name: 'lean', keys: [['KeyA', 'A'], ['KeyD', 'D']], arrow: 'leftright' },
+  { name: 'raise', keys: [['KeyW', 'W']], arrow: 'up' },
+  { name: 'press', keys: [['KeyE', 'E']] },
+];
+
+function render(r) {
+  const c = document.createElement('canvas'); c.width = W; c.height = 33 + 2 * PAD; const g = c.getContext('2d');
+  const y = PAD;
+  const codes = r.keys.map(k => k[0]), labels = r.keys.map(k => k[1]);
+  const gap = r.arrow === 'leftright' ? 22 : 6, ws = codes.map((cd, i) => glyphW(g, cd, labels[i]));
+  const tail = r.arrow && r.arrow !== 'leftright' ? 16 : 0;
+  let x = Math.round((W - (ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1))) / 2);
+  codes.forEach((cd, i) => {
+    x += bindGlyph(g, x, y + 4, cd, labels[i]);
+    if (i < codes.length - 1) { if (r.arrow === 'leftright') { arrow(g, x + gap / 2 - 5, y + 14, 'left', 0.8); arrow(g, x + gap / 2 + 5, y + 14, 'right', 0.8); } x += gap; }
+  });
+  if (tail && r.arrow === 'click') burst(g, x + 2, y + 2);
+  else if (tail) arrow(g, x + 10, y + 14, r.arrow, 0.9);
+  // Crop to the drawn pixels.
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+  for (let yy = 0; yy < c.height; yy++) for (let xx = 0; xx < c.width; xx++) if (d[(yy * c.width + xx) * 4 + 3]) { x0 = Math.min(x0, xx); x1 = Math.max(x1, xx); y0 = Math.min(y0, yy); y1 = Math.max(y1, yy); }
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, px = g.getImageData(x0, y0, w, h).data;
+  let bin = ''; for (let i = 0; i < px.length; i++) bin += String.fromCharCode(px[i]);
+  return { name: r.name, x: x0, y: y0 - PAD, w, h, data: btoa(bin) };
+}
+
+const rows = ROWS.map(render);
+const res = await fetch('/out', { method: 'POST', body: JSON.stringify(rows) });
+document.getElementById('log').textContent = `posted ${rows.length} rows: ${await res.text()}\n` + rows.map(r => `${r.name} ${r.x},${r.y} ${r.w}x${r.h}`).join('\n');
+</script>

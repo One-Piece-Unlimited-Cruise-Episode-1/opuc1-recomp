@@ -1,0 +1,102 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>pc art generator</title>
+<style>body { background: #345; color: #fff; font: 12px sans-serif; } .row { display: flex; gap: 12px; align-items: center; margin: 4px 0; } canvas { background: #789; }</style>
+<pre id="log">working…</pre>
+<div id="out"></div>
+<script type="module">
+// Runs the Play tab's PcArt (play/ui/pcart.js) on the game pictures with the recompilation's fixed keys (the Play
+// tab's default bindings) and splits each result: the drawImage / clearRect calls whose source is the game picture are
+// recorded as geometry and skipped, everything else (the keyglyph.js glyphs) lands on a transparent layer. The page
+// also replays the recording next to the Play tab's own output, so the split can be checked by eye.
+import { AquaPack } from '/play/ui/aqua.js';
+import { PcArt } from '/play/ui/pcart.js';
+import { ACTIONS, keyLabel } from '/shared/web/input/controller.js';
+
+const bindings = Object.fromEntries(ACTIONS.map(a => [a.id, a.keys.slice()]));
+const pad = { bindings, label: id => keyLabel((bindings[id] || []).filter(Boolean)[0]) };
+const play = { debugFlags: {}, ctx: { pad } };
+
+// The pictures pcart.js SPECS lists (file → ids).
+const PICS = {
+  'En/Tutorial.aar': [0xa00050, 0xa00051, 0xa00052, 0xa00053, 0xa00054, 0xa00055, 0xa00056, 0xa00057, 0xa00058, 0xa00059, 0xa0005a, 0xa0005b, 0xa0005c, 0xa0005d, 0xa0005e, 0xa0005f, 0xa00061],
+  'En/PlayDispContent.aar': [0xa00490, 0xa00493, 0xa00494, 0xa00495],
+  'SimpleWindow.aar': [0xa00000, 0xa00001],
+  'En/PauseMenu.aar': [0xa00200, 0xa00201, 0xa00202, 0xa00203, 0xa00204, 0xa0020a],
+  'En/StatusDetail.aar': [0xa00268, 0xa00273],
+  'En/MakeItemTree.aar': [0xa00337, 0xa0033b],
+  'En/BaseMenu.aar': [0xa00301],
+  'En/CostumeChange.aar': [0xa003b2],
+  'En/DataBase.aar': [0xa00356, 0xa00357, 0xa00358, 0xa00359, 0xa0035a],
+  'En/EndMakeItem.aar': [0xa0039e],
+  'En/ItemMenu.aar': [0xa002e2, 0xa002e3, 0xa002e4],
+  'En/NextIsland.aar': [0xa00341, 0xa00342],
+  'En/PictBook.aar': [0xa00373, 0xa00377],
+};
+
+const fetchBytes = async p => { const r = await fetch(`/files/${p}`); if (!r.ok) throw new Error(`${p}: ${r.status}`); return new Uint8Array(await r.arrayBuffer()); };
+
+// The split: drawImage / clearRect on a game picture's canvas are recorded per destination canvas.
+const rec = new Map();
+const origDraw = CanvasRenderingContext2D.prototype.drawImage, origClear = CanvasRenderingContext2D.prototype.clearRect;
+let splitting = false;
+const mat = g => { const t = g.getTransform(); return [t.a, t.b, t.c, t.d, t.e, t.f]; };
+CanvasRenderingContext2D.prototype.drawImage = function (src, ...a) {
+  if (!splitting || !src?.__game) return origDraw.call(this, src, ...a);
+  let sx = 0, sy = 0, sw = src.width, sh = src.height, dx, dy, dw, dh;
+  if (a.length === 2) [dx, dy] = a, dw = sw, dh = sh;
+  else if (a.length === 4) [dx, dy, dw, dh] = a;
+  else [sx, sy, sw, sh, dx, dy, dw, dh] = a;
+  const ops = rec.get(this.canvas) ?? []; rec.set(this.canvas, ops);
+  ops.push({ kind: 0, smooth: this.imageSmoothingEnabled, sx, sy, sw, sh, dx, dy, dw, dh, m: mat(this) });
+};
+CanvasRenderingContext2D.prototype.clearRect = function (x, y, w, h) {
+  if (splitting) { const ops = rec.get(this.canvas) ?? []; rec.set(this.canvas, ops); ops.push({ kind: 1, smooth: false, sx: 0, sy: 0, sw: 0, sh: 0, dx: x, dy: y, dw: w, dh: h, m: mat(this) }); }
+  return origClear.call(this, x, y, w, h);
+};
+
+const pixelsOf = c => c.getContext('2d').getImageData(0, 0, c.width, c.height);
+function crop(c) {
+  const d = pixelsOf(c).data; let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+  for (let y = 0; y < c.height; y++) for (let x = 0; x < c.width; x++) if (d[(y * c.width + x) * 4 + 3]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  if (x1 < 0) return { x: 0, y: 0, w: 0, h: 0, data: '' };
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, px = c.getContext('2d').getImageData(x0, y0, w, h).data;
+  let bin = ''; for (let i = 0; i < px.length; i++) bin += String.fromCharCode(px[i]);
+  return { x: x0, y: y0, w, h, data: btoa(bin) };
+}
+const show = (label, ...cs) => { const r = document.createElement('div'); r.className = 'row'; r.append(label, ...cs.filter(Boolean)); document.getElementById('out').append(r); };
+
+const pics = [], survey = [];
+for (const [file, ids] of Object.entries(PICS)) {
+  const pack = await AquaPack.load(fetchBytes, `Menu/${file}`);
+  for (const id of ids) {
+    const raw = pack.rawImage(id), e40 = pack.entry(0x40, id), e42 = pack.entry(0x42, id);
+    const head = (e => e ? [...pack.archive.data(e).subarray(0, 24)].map(b => b.toString(16).padStart(2, '0')).join('') : '')(e40 ?? e42);
+    survey.push({ file, id: id.toString(16), role: e40 ? 0x40 : e42 ? 0x42 : 0, w: raw?.w, h: raw?.h, frames: raw?.frames, head });
+    if (!raw) continue;
+    raw.canvas.__game = true;
+    // The Play tab's own output (no split), then the split run on a fresh PcArt.
+    const full = new PcArt(play).swap(pack, id, raw);
+    splitting = true; rec.clear();
+    const split = new PcArt(play).swap(pack, id, raw);
+    splitting = false;
+    if (!full || !split) { show(`${file} ${id.toString(16)}: no PC version`); continue; }
+    const ops = rec.get(split.canvas) ?? [];
+    // Replay the recording under the glyph layer, as the runtime does.
+    const re = document.createElement('canvas'); re.width = split.canvas.width; re.height = split.canvas.height;
+    const g = re.getContext('2d');
+    for (const o of ops) {
+      g.save(); g.setTransform(...o.m); g.imageSmoothingEnabled = o.smooth;
+      if (o.kind === 0) origDraw.call(g, raw.canvas, o.sx, o.sy, o.sw, o.sh, o.dx, o.dy, o.dw, o.dh); else origClear.call(g, o.dx, o.dy, o.dw, o.dh);
+      g.restore();
+    }
+    origDraw.call(g, split.canvas, 0, 0);
+    const a = pixelsOf(full.canvas).data, b = pixelsOf(re).data; let diff = 0; for (let i = 0; i < a.length; i++) diff = Math.max(diff, Math.abs(a[i] - b[i]));
+    show(`${file} ${id.toString(16)} ops ${ops.length} maxdiff ${diff}`, full.canvas, re);
+    pics.push({ file: file.split('/').pop(), id, srcW: raw.canvas.width, srcH: raw.canvas.height, w: split.canvas.width, h: split.canvas.height, ops, glyph: crop(split.canvas), diff });
+  }
+}
+await fetch('/survey', { method: 'POST', body: JSON.stringify(survey) });
+const res = await fetch('/out', { method: 'POST', body: JSON.stringify(pics) });
+document.getElementById('log').textContent = `posted ${pics.length} pictures: ${await res.text()}; max diff ${Math.max(...pics.map(p => p.diff))}`;
+</script>

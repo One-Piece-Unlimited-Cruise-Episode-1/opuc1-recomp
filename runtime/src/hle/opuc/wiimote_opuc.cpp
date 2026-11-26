@@ -31,6 +31,8 @@
 //             "WHEEL" press keyboard / mouse inputs through the scheme above (for tests), e.g. "S3@40:KEY_LSHIFT:0.1".
 //   OPUC_TRACE_INPUT=1 logs every change of the written hold word, the ui flag and shake pulses.
 #include "hle_stubs.h"
+#include "dev_pages.h"
+#include "fishing_pc.h"
 #include "abi_bridge.h"
 #include "input_bindings.h"
 #include "memory.h"
@@ -42,6 +44,7 @@
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_scancode.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -121,6 +124,7 @@ struct Keyboard {
     std::array<std::vector<Act>, kCodeCount> acts{};
     std::deque<Macro> queue;
     int wheel = 0;
+    double mouseDx = 0, mouseDy = 0;   // mouse movement since the last sample, pixels (fishing Remote input / lean)
     bool walk = false;
     struct { bool on = false; int frames = 0; bool dash = false; int hold = 0; } dodge;
     uint64_t frame = 0;
@@ -197,6 +201,7 @@ bool SDLCALL EventWatch(void*, SDL_Event* e) {
     case SDL_EVENT_MOUSE_BUTTON_DOWN: PressLocked(MouseCode(e->button.button)); break;
     case SDL_EVENT_MOUSE_BUTTON_UP: ReleaseLocked(MouseCode(e->button.button)); break;
     case SDL_EVENT_MOUSE_WHEEL: if (e->wheel.y != 0) kb.wheel++; break;
+    case SDL_EVENT_MOUSE_MOTION: kb.mouseDx += e->motion.xrel; kb.mouseDy += e->motion.yrel; break;
     case SDL_EVENT_WINDOW_FOCUS_LOST: ClearLocked(); break;
     default: break;
     }
@@ -233,7 +238,9 @@ struct KbSample {
     uint32_t hold = 0;
     float sx = 0, sy = 0;
     bool shake = false, shakePulse = false, nunchukShake = false;
+    OpucFishing::PadIn fish;   // the Play app's Fishing key group (read while the rod is out)
 };
+constexpr double kLookRadPerPx = 0.0025;   // controller.js LOOK_RAD_PER_PX
 
 // controller.js read(): one sample per 60 Hz game frame.
 KbSample ReadKeyboard(bool ui, const std::array<bool, kCodeCount>& scriptKeys, int scriptWheel) {
@@ -295,6 +302,20 @@ KbSample ReadKeyboard(bool ui, const std::array<bool, kCodeCount>& scriptKeys, i
     s.shake = mouseShake && !ui;
     s.shakePulse = m.shake;
     s.nunchukShake = h(Struggle);
+    // Fishing group defaults: fishCast Mouse0 / J (= Attack), fishHook Mouse2 / L (= Shake), lean A / D and raise W
+    // (= the move keys), fishQuit Space / Backspace (= Jump / Back).
+    static bool prevHook = false, prevQuit = false;
+    const bool hook = h(Shake), quit = h(Jump) || h(Back);
+    s.fish.cast = h(Attack);
+    s.fish.hookEdge = hook && !prevHook;
+    s.fish.quitEdge = quit && !prevQuit;
+    prevHook = hook;
+    prevQuit = quit;
+    s.fish.sx = x;
+    s.fish.sy = y;
+    s.fish.mouseDx = kb.mouseDx * kLookRadPerPx;
+    s.fish.mouseDy = kb.mouseDy * kLookRadPerPx;
+    kb.mouseDx = kb.mouseDy = 0;
     kb.frame++;
     kb.latched.fill(false);
     return s;
@@ -437,6 +458,7 @@ struct Sample {
     float sx = 0, sy = 0;
     bool shake = false, shakePulse = false, nunchukShake = false;
     bool ui = false;
+    OpucFishing::PadIn fish;
 };
 
 Sample Poll() {
@@ -473,6 +495,7 @@ Sample Poll() {
     s.shake |= k.shake;
     s.shakePulse |= k.shakePulse;
     s.nunchukShake |= k.nunchukShake;
+    s.fish = k.fish;
 
     OpenGamepad();
     if (g.pad) {
@@ -520,41 +543,91 @@ extern "C" int32_t WPADProbe_OPUC(uint32_t chan, uint32_t typePtr) {
 }
 PPC_NATIVE_OVERRIDE(802C30F0, WPADProbe_OPUC, int32_t, (uint32_t chan, uint32_t typePtr), (chan, typePtr));
 
-// KPADRead (8030454c): one fresh sample per call for channel 0, none for the others.
+// KPADRead (8030454c): one call per game frame for channel 0, none for the others. It returns about 3.3 samples
+// a call (10 every 3 frames), as the real remote's 200 Hz KPAD does: the fishing rod's WiiMotion counts samples
+// (AnalyzeSwing's quiet < 12, the gesture timers), so the accelerometer has to arrive at the game's rate. Sample 0
+// is the newest; every sample carries the same buttons and stick.
 extern "C" int32_t KPADRead_OPUC(uint32_t chan, uint32_t buf, uint32_t length) {
     if (!g.init) Init();
     if (chan != 0 || buf == 0 || length == 0) return 0;
+    static double sampleAcc = 0;
+    sampleAcc += OpucFishing::kSamplesPerFrame;
+    int n = static_cast<int>(sampleAcc);
+    sampleAcc -= n;
+    n = std::clamp(n, 1, static_cast<int>(std::min<uint32_t>(length, 16)));
     const Sample s = Poll();
-    const uint32_t hold = s.hold;
-    for (uint32_t o = 0; o < kKpadStatusSize; o += 4) Memory::Write32(buf + o, 0);
-    Memory::Write32(buf + 0x00, hold);
-    Memory::Write32(buf + 0x04, hold & ~g.lastHold);   // trig
-    Memory::Write32(buf + 0x08, g.lastHold & ~hold);   // release
-    const Vec3 ra = RemoteAccel(s.shake, s.shakePulse, kb.frame);
-    const float raValue = std::sqrt(ra.x * ra.x + ra.y * ra.y + ra.z * ra.z);
-    WriteF32(buf + 0x0C, ra.x);
-    WriteF32(buf + 0x10, ra.y);
-    WriteF32(buf + 0x14, ra.z);
-    WriteF32(buf + 0x18, raValue);                     // acc_value
-    Memory::Write8(buf + 0x5C, 1);                     // dev_type: Nunchuk attached
-    Memory::Write8(buf + 0x5D, 0);                     // wpad_err: none
-    WriteF32(buf + 0x60, s.sx);                        // Nunchuk stick (ConvertKpadToRaw negates y)
-    WriteF32(buf + 0x64, s.sy);
+    OpucDev::Tick();  // the Dev Debug switches held each frame (dev_pages.cpp)
+    uint32_t hold = s.hold;
+
+    // Fishing owns A, B, D-pad Right and the accelerometer while the player fishes (fishing_pc.cpp).
+    static uint32_t lastPhysHold = 0;
+    static bool lastShake = false;
+    OpucFishing::PadIn fin = s.fish;
+    fin.cast = (s.hold & kA) != 0;
+    fin.quitEdge = (s.hold & kB) && !(lastPhysHold & kB);
+    fin.hookEdge = (s.shake && !lastShake) || s.shakePulse;
+    fin.sx = s.sx;
+    fin.sy = s.sy;
+    lastPhysHold = s.hold;
+    lastShake = s.shake;
+    static std::vector<OpucFishing::V3> fishAcc;
+    OpucFishing::PadOut fo;
+    const bool fishing = OpucFishing::Frame(fin, n, fishAcc, fo);
+    if (fishing) {
+        hold &= ~(kA | kB);
+        if (fo.A) hold |= kA;
+        if (fo.B) hold |= kB;
+        if (fo.right) hold |= kRight;
+    }
+
+    const Vec3 ra = RemoteAccel(s.shake && !fishing, s.shakePulse && !fishing, kb.frame);
     const Vec3 na = NunchukAccel(s.nunchukShake, kb.frame);
-    WriteF32(buf + 0x68, na.x);
-    WriteF32(buf + 0x6C, na.y);
-    WriteF32(buf + 0x70, na.z);
-    WriteF32(buf + 0x74, std::sqrt(na.x * na.x + na.y * na.y + na.z * na.z));
+    float raValue = 0;
+    // acc_speed (+0x1C) is |acc - previous sample|: WiiMotion's still-sample test reads it (0 < speed < 0.02).
+    static Vec3 prevAcc{0.f, -1.f, 0.f};
+    std::vector<Vec3> acc(static_cast<size_t>(n), ra);
+    if (fishing)
+        for (int i = 0; i < n; ++i)
+            if (static_cast<size_t>(n - 1 - i) < fishAcc.size()) { const OpucFishing::V3& f = fishAcc[n - 1 - i]; acc[i] = {f.x, f.y, f.z}; }
+    std::vector<float> speed(static_cast<size_t>(n), 0.f);
+    for (int i = n - 1; i >= 0; --i) {   // oldest (n - 1) to newest (0)
+        const Vec3& v = acc[i];
+        speed[i] = std::sqrt((v.x - prevAcc.x) * (v.x - prevAcc.x) + (v.y - prevAcc.y) * (v.y - prevAcc.y) + (v.z - prevAcc.z) * (v.z - prevAcc.z));
+        prevAcc = v;
+    }
+    for (int i = 0; i < n; ++i) {
+        const uint32_t e = buf + static_cast<uint32_t>(i) * kKpadStatusSize;
+        for (uint32_t o = 0; o < kKpadStatusSize; o += 4) Memory::Write32(e + o, 0);
+        Memory::Write32(e + 0x00, hold);
+        Memory::Write32(e + 0x04, i == 0 ? hold & ~g.lastHold : 0);   // trig (the newest sample)
+        Memory::Write32(e + 0x08, i == 0 ? g.lastHold & ~hold : 0);   // release
+        const Vec3& v = acc[i];
+        const float value = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+        if (i == 0) raValue = value;
+        WriteF32(e + 0x0C, v.x);
+        WriteF32(e + 0x10, v.y);
+        WriteF32(e + 0x14, v.z);
+        WriteF32(e + 0x18, value);                     // acc_value
+        WriteF32(e + 0x1C, speed[i]);                  // acc_speed
+        Memory::Write8(e + 0x5C, 1);                   // dev_type: Nunchuk attached
+        Memory::Write8(e + 0x5D, 0);                   // wpad_err: none
+        WriteF32(e + 0x60, s.sx);                      // Nunchuk stick (ConvertKpadToRaw negates y)
+        WriteF32(e + 0x64, s.sy);
+        WriteF32(e + 0x68, na.x);
+        WriteF32(e + 0x6C, na.y);
+        WriteF32(e + 0x70, na.z);
+        WriteF32(e + 0x74, std::sqrt(na.x * na.x + na.y * na.y + na.z * na.z));
+    }
     if (g.trace) {
         if (hold != g.lastHold || s.ui != g.lastUi)
             RT_LOG(RT_TAG_HLE) << "[opuc] input hold=0x" << std::hex << hold << std::dec << " ui=" << s.ui
-                               << " stick=(" << s.sx << "," << s.sy << ")" << std::endl;
+                               << " stick=(" << s.sx << "," << s.sy << ")" << (fishing ? " fishing" : "") << std::endl;
         if (raValue >= 3.0f && g.lastAccValue < 3.0f)
             RT_LOG(RT_TAG_HLE) << "[opuc] input shake pulse acc_value=" << raValue << std::endl;
     }
     g.lastHold = hold;
     g.lastUi = s.ui;
     g.lastAccValue = raValue;
-    return 1;
+    return n;
 }
 PPC_NATIVE_OVERRIDE(8030454C, KPADRead_OPUC, int32_t, (uint32_t chan, uint32_t buf, uint32_t length), (chan, buf, length));

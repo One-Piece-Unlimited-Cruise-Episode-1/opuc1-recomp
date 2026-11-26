@@ -82,6 +82,16 @@ struct RuntimeUserConfig {
     std::vector<std::string> overlayRoots;
     std::optional<bool> rumbleEnabled;
     std::optional<int32_t> muteHotkey;
+    // The Dev entry under the pause top page (hle/opuc/dev_menu.cpp; not in the game).
+    std::optional<bool> devMenu;
+    // PC fishing (hle/opuc/fishing_pc.cpp; from the Play tab, not in the game): Remote input (the mouse moves the
+    // Wii Remote) instead of the Simple power bar, the assist HUD, and the PC PlayGuide pictures.
+    std::optional<bool> fishingRemoteInput;
+    std::optional<bool> fishingAssist;
+    std::optional<bool> fishingPcGuide;
+    // PC button art (hle/opuc/pc_pictures.cpp; the Play tab's pcart.js): tutorial, prompt and menu help pictures
+    // with the bound keys instead of Wii Remote buttons.
+    std::optional<bool> pcButtonArt;
 };
 
 namespace RuntimeConfigFile {
@@ -301,6 +311,18 @@ inline void EnsureConfigFile() {
               "mix_worker = true\n\n"
               "[controller]\n"
               "\n"
+              "[game]\n"
+              "# The Dev entry under the pause menu (cheats and debug pages; not in the game).\n"
+              "dev_menu = true\n"
+              "# Fishing on PC: false = Simple input (hold the left mouse button for the cast power bar),\n"
+              "# true = Remote input (the mouse moves the Wii Remote).\n"
+              "fishing_remote_input = false\n"
+              "# The fishing assist HUD (cast power bar, predicted distance, lean track; not in the game).\n"
+              "fishing_assist = true\n"
+              "# PlayGuide pictures with keyboard / mouse glyphs instead of the Wii Remote.\n"
+              "fishing_pc_guide = true\n"
+              "# Tutorial, prompt and menu help pictures with the bound keys instead of Wii Remote buttons.\n"
+              "pc_button_art = true\n\n"
               "[discord]\n"
               "# Rich Presence talks only to a locally-running Discord client.\n"
               "# Off until client_id is set: put a Discord application ID there\n"
@@ -429,6 +451,11 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.gxWorker = FindConfigValue<bool>(document, "video", "gx_worker");
     config.disableCopyFilter = FindConfigValue<bool>(document, "video", "disable_copy_filter");
     config.showFps = FindConfigValue<bool>(document, "video", "show_fps");
+    config.devMenu = FindConfigValue<bool>(document, "game", "dev_menu");
+    config.fishingRemoteInput = FindConfigValue<bool>(document, "game", "fishing_remote_input");
+    config.fishingAssist = FindConfigValue<bool>(document, "game", "fishing_assist");
+    config.fishingPcGuide = FindConfigValue<bool>(document, "game", "fishing_pc_guide");
+    config.pcButtonArt = FindConfigValue<bool>(document, "game", "pc_button_art");
     config.textureReplacements = FindConfigValue<bool>(document, "video", "texture_replacements");
     config.textureDumps = FindConfigValue<bool>(document, "video", "texture_dumps");
 
@@ -886,6 +913,36 @@ inline bool DisableCopyFilter(bool fallback = true) {
 
 inline bool ShowFps(bool fallback = true) {
     return Get().showFps.value_or(fallback);
+}
+
+inline bool DevMenuEnabled(bool fallback = true) {
+    return Get().devMenu.value_or(fallback);
+}
+
+inline bool SetDevMenu(bool value) {
+    Mutable().devMenu = value;
+    return WriteSetting("game", "dev_menu", value ? "true" : "false");
+}
+
+inline bool FishingRemoteInput(bool fallback = false) { return Get().fishingRemoteInput.value_or(fallback); }
+inline bool SetFishingRemoteInput(bool value) {
+    Mutable().fishingRemoteInput = value;
+    return WriteSetting("game", "fishing_remote_input", value ? "true" : "false");
+}
+inline bool FishingAssist(bool fallback = true) { return Get().fishingAssist.value_or(fallback); }
+inline bool SetFishingAssist(bool value) {
+    Mutable().fishingAssist = value;
+    return WriteSetting("game", "fishing_assist", value ? "true" : "false");
+}
+inline bool PcButtonArt(bool fallback = true) { return Get().pcButtonArt.value_or(fallback); }
+inline bool SetPcButtonArt(bool value) {
+    Mutable().pcButtonArt = value;
+    return WriteSetting("game", "pc_button_art", value ? "true" : "false");
+}
+inline bool FishingPcGuide(bool fallback = true) { return Get().fishingPcGuide.value_or(fallback); }
+inline bool SetFishingPcGuide(bool value) {
+    Mutable().fishingPcGuide = value;
+    return WriteSetting("game", "fishing_pc_guide", value ? "true" : "false");
 }
 
 inline bool TextureReplacements(bool fallback = false) {
