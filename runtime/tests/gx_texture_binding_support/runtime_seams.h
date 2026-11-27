@@ -6,7 +6,8 @@
 
 
 namespace TextureBindingTest {
-std::array<uint8_t, 4 * 1024 * 1024> memory{};
+// All of MEM1: OPUC's __GXData pointer (kGXDataPtrAddr, 0x8068EB20) sits past the first 4 MiB.
+std::array<uint8_t, 24 * 1024 * 1024> memory{};
 uint32_t unreadableObject = 0;
 uint32_t unreadableObjectAccesses = 0;
 uint64_t rangeChecks = 0;

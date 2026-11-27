@@ -168,6 +168,8 @@ if(TARGET gx_fifo_tests)
         "${MKW_AURORA_DIR}/tests/gx_test_stubs.cpp"
         ${_mkw_gx_encoder_sources})
     target_compile_definitions(mkw_gx_sync_tests PRIVATE MKW_GX_COPY_TESTING=1)
+    # gx_copy.cpp includes the OPUC milestone hooks as "hle/opuc/milestones.h".
+    target_include_directories(mkw_gx_sync_tests PRIVATE "${MKW_TEST_RUNTIME_DIR}/src")
     foreach(_mkw_gx_test IN ITEMS mkw_gx_texture_binding_tests mkw_gx_sync_tests)
         target_include_directories(${_mkw_gx_test} PRIVATE
             ${_mkw_gx_includes} "${MKW_TEST_RUNTIME_DIR}/tests")

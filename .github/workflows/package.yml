@@ -123,6 +123,23 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # A dispatched run's Package version becomes the one product version for this job, so the
+      # setup host (--version), the installer manifest and the macOS bundle all report it.
+      - name: Apply the requested package version
+        if: inputs.version != ''
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${PACKAGE_VERSION#v}"
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "::error::Package version must be one to three period-separated integers: $PACKAGE_VERSION"; exit 1; }
+          props=launcher/Directory.Build.props
+          sed -E "s#<Version>[^<]*</Version>#<Version>$version</Version>#" "$props" > "$props.tmp"
+          mv "$props.tmp" "$props"
+          grep -Fq "<Version>$version</Version>" "$props"
+          echo "Package version: $version"
+
       # appimagetool ships as an AppImage itself and needs to self-mount via FUSE to run directly;
       # GitHub's Ubuntu runners don't have libfuse2 preinstalled. The rest is what the precompiled
       # aurora/SDL3 package (Prepare-NativePrebuilt.sh) needs to build.
@@ -139,6 +156,14 @@ jobs:
 
       - name: Build AppImage
         run: bash launcher/build-appimage.sh
+
+      - name: Verify the AppImage reports the package version
+        run: |
+          set -euo pipefail
+          expected=$(sed -nE 's/.*<Version>([^<]+)<\/Version>.*/\1/p' launcher/Directory.Build.props | head -n 1)
+          actual=$(launcher/dist/opuc1-recomp-setup-${{ matrix.arch }}.AppImage --version)
+          echo "AppImage version: $actual (expected $expected)"
+          test "$actual" = "$expected"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -159,9 +184,34 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # A dispatched run's Package version becomes the one product version for this job, so the
+      # setup host (--version), the installer manifest and the macOS bundle all report it.
+      - name: Apply the requested package version
+        if: inputs.version != ''
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${PACKAGE_VERSION#v}"
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "::error::Package version must be one to three period-separated integers: $PACKAGE_VERSION"; exit 1; }
+          props=launcher/Directory.Build.props
+          sed -E "s#<Version>[^<]*</Version>#<Version>$version</Version>#" "$props" > "$props.tmp"
+          mv "$props.tmp" "$props"
+          grep -Fq "<Version>$version</Version>" "$props"
+          echo "Package version: $version"
+
       - name: Build installer
         shell: pwsh
         run: ./launcher/Build-Installer.ps1
+
+      - name: Verify the setup host reports the package version
+        shell: pwsh
+        run: |
+          $expected = ([xml](Get-Content launcher/Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          $actual = ((& launcher/artifacts/installer-build/publish/setup/opuc1-recomp-setup.exe --version) -join '').Trim()
+          Write-Host "Setup host version: $actual (expected $expected)"
+          if ($actual -ne $expected) { exit 1 }
 
       - uses: actions/upload-artifact@v7
         with:
@@ -181,6 +231,23 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+
+      # A dispatched run's Package version becomes the one product version for this job, so the
+      # setup host (--version), the installer manifest and the macOS bundle all report it.
+      - name: Apply the requested package version
+        if: inputs.version != ''
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="${PACKAGE_VERSION#v}"
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo "::error::Package version must be one to three period-separated integers: $PACKAGE_VERSION"; exit 1; }
+          props=launcher/Directory.Build.props
+          sed -E "s#<Version>[^<]*</Version>#<Version>$version</Version>#" "$props" > "$props.tmp"
+          mv "$props.tmp" "$props"
+          grep -Fq "<Version>$version</Version>" "$props"
+          echo "Package version: $version"
 
       - name: Verify Apple Silicon runner
         shell: bash
@@ -308,6 +375,14 @@ jobs:
           # with each architecture's setup CLI.
           run=launcher/dist/opuc1-recomp-setup-macos.run
           version=$("$run" --version)
+          expected=$(sed -nE 's/.*<Version>([^<]+)<\/Version>.*/\1/p' launcher/Directory.Build.props | head -n 1)
+          echo ".run version: $version (expected $expected)"
+          test "$version" = "$expected"
+          for arch in arm64 x86_64; do
+            setup_version=$(/usr/bin/arch -"$arch" "$resources/tools/$arch/opuc1-recomp-setup" --version)
+            echo "$arch setup CLI version: $setup_version"
+            test "$setup_version" = "$expected"
+          done
           HOME="$RUNNER_TEMP/run-home" "$run" check-products
           unpacked="$RUNNER_TEMP/run-home/Library/Application Support/One Piece Unlimited Recompilation Episode 1/Setup/$version"
           for arch in arm64 x86_64; do

@@ -30,6 +30,13 @@ void observe_copy(TextureHandle target, ClipRect rect, bool clearColor, bool cle
 
 extern "C" {
 int g_gxFrameCount = 0;
+// GXCopyDisp reports OPUC milestones and lifts the startup cover; the fixture links neither
+// hle/opuc/milestones.cpp nor settings_overlay.cpp.
+void OpucMilestone(const char*) {}
+void OpucCountCopyDisp() {}
+}
+namespace settings_overlay {
+void NotifyStrapInputAccepted() noexcept {}
 }
 TexCopyState g_texCopyState;
 
