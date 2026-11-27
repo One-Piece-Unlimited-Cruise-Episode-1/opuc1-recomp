@@ -3803,6 +3803,7 @@
 8011a344 g_ShaderCore__HasMaterialFlag800
 8011a3b4 g_ShaderCore__CacheMaterialTypeFlags
 8011a424 g_ShaderCore__GetMaterialTypeFlags
+8011a498 0x8011a498
 8011a49c g_ShaderCore__Init
 8011a888 0x8011a888
 8011a88c g_ShaderCore__Shutdown

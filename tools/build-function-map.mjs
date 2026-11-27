@@ -176,7 +176,10 @@ for (const s of text) {
       const u = rd(a + 4 * k); if (u === null) break;
       const op = u >>> 26, rA = (u >>> 16) & 31, rT = (u >>> 21) & 31;
       let v = null;
-      if (op === 14 && rA === rD) v = (hi + ((u & 0xFFFF) << 16 >> 16)) >>> 0;   // addi rT,rD,simm
+      // addi rT,rD,simm, and addic / addic. rT,rD,simm: CodeWarrior forms a function's address with addic. when it
+      // also tests it for null (`if (&fn)`), e.g. the ShaderCore pass-shader thunk 8011a498 (lis r0,0x8012 +
+      // addic. r0,r0,-0x5b68 at 801c3060 and 801f49c8), which nothing calls directly.
+      if ((op === 14 || op === 12 || op === 13) && rA === rD) v = (hi + ((u & 0xFFFF) << 16 >> 16)) >>> 0;
       else if (op === 24 && rT === rD) v = (hi | (u & 0xFFFF)) >>> 0;            // ori rA,rD,uimm (rS=rD)
       if (v !== null) { if (!(v & 3) && inText(v) && !starts.has(v) && looksLikeEntry(v)) {
           const prev = rd(v - 4), cur = rd(v);
