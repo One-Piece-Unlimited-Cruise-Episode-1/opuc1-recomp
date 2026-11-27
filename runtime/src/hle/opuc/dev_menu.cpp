@@ -1186,6 +1186,34 @@ void TestWarp(const CpuContext& c) {
     const char* env = std::getenv("OPUC_TEST_WARP");
     if (done || !env) return;
     done = true;
+    if (std::getenv("OPUC_TEST_ROD")) {  // test helper: the max-level rod too, as Dev > Fishing gives it
+        GiveMaxRod(c);
+        RT_LOG(RT_TAG_HLE) << "[opuc] test: granted the fishing rod at max level" << std::endl;
+    }
+    // Test helper, OPUC_TEST_GIVE="id[:extra0],...": one of each, silently (showUi 0: no item-get scripts); with
+    // :extra0 through an ItemRef, the level of a flagLevel item (3:1 = the Bug-Catcher Net, shown as id 2).
+    if (const char* give = std::getenv("OPUC_TEST_GIVE")) {
+        const uint32_t cm = Memory::Read32(kCharaManagerPtr);
+        for (const char* p = give; cm && *p;) {
+            char* end = nullptr;
+            const unsigned long id = std::strtoul(p, &end, 0);
+            if (end == p) break;
+            uint32_t ok = 0;
+            if (*end == ':') {
+                const char* q = end + 1;
+                const unsigned long extra0 = std::strtoul(q, &end, 0);
+                const uint32_t ref = OpucGuest::ScratchBelow(c, 0x10);
+                Call(c, kItemRefInit, {ref, static_cast<uint32_t>(id), static_cast<uint32_t>(extra0), 0});
+                ok = Call(c, kGrantItemFromSpec, {cm, ref, 1, 0, 1});
+                Call(c, kItemRefDestruct, {ref, 0xFFFFFFFFu});
+                RT_LOG(RT_TAG_HLE) << "[opuc] test: granted item " << id << " level " << extra0 << (ok ? "" : " (failed)") << std::endl;
+            } else {
+                ok = Call(c, kGrantItemById, {cm, static_cast<uint32_t>(id), 1, 0, 1});
+                RT_LOG(RT_TAG_HLE) << "[opuc] test: granted item " << id << (ok ? "" : " (failed)") << std::endl;
+            }
+            p = *end == ',' ? end + 1 : end;
+        }
+    }
     float v[4] = {0, 0, 0, 0};
     int n = 0;
     for (const char* p = env; *p && n < 4; ++n) {

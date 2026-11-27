@@ -11,7 +11,8 @@
 //   keyboard + mouse  the Play app's control scheme (programs/apps/shared/web/input/controller.js, its default
 //             bindings, hardcoded; see kBindings below). Every action ends in Wii buttons / stick / acceleration:
 //               WASD stick (CapsLock toggles walk = half tilt), Space/K jump = B, LMB/J attack = A (hold charges),
-//               RMB/L shake attack = a held Remote swing, Shift tap = dodge (A + B on one frame, on release within
+//               RMB/L shake attack = a held Remote swing (with a pickaxe / net in the hand: hold and drag to swing,
+//               see ToolFrame), Shift tap = dodge (A + B on one frame, on release within
 //               12 frames), Shift held = dash (C, -, C, then C held), Q skill 1 = C then C + A, R skill 2 = C then
 //               C + shake, MMB/T lock on = Z, wheel = switch target (Z double-tap), O = Nunchuk shake (break free),
 //               E/Enter = A, V = 1 (first-person look), C = - (character select), X = -, 1/2/3/4 = D-pad
@@ -28,12 +29,14 @@
 //             "S<hex state>@<sec>:<buttons>[:<dur>]" counts from the first read that sees ProjProcess in that
 //             state, e.g. "S1@8.3:A" presses A 8.3 s after the title state (1) starts. It fires only while the
 //             game is still in that state. Key tokens "KEY_<SDL scancode name>" / "MOUSE_LEFT|MIDDLE|RIGHT" /
-//             "WHEEL" press keyboard / mouse inputs through the scheme above (for tests), e.g. "S3@40:KEY_LSHIFT:0.1".
+//             "WHEEL" press keyboard / mouse inputs through the scheme above (for tests), e.g. "S3@40:KEY_LSHIFT:0.1";
+//             "MDX=<px>" / "MDY=<px>" move the mouse that many pixels a frame while the event lasts.
 //   OPUC_TRACE_INPUT=1 logs every change of the written hold word, the ui flag and shake pulses.
 #include "hle_stubs.h"
 #include "dev_pages.h"
 #include "fishing_pc.h"
 #include "abi_bridge.h"
+#include "guest_function_imports.h"
 #include "input_bindings.h"
 #include "memory.h"
 #include "runtime_log.h"
@@ -238,6 +241,8 @@ struct KbSample {
     uint32_t hold = 0;
     float sx = 0, sy = 0;
     bool shake = false, shakePulse = false, nunchukShake = false;
+    bool toolKey = false;           // the shake key (RMB / L) held in the field: a held tool's drag swing
+    double mousePxX = 0, mousePxY = 0;  // mouse movement this frame, pixels
     OpucFishing::PadIn fish;   // the Play app's Fishing key group (read while the rod is out)
 };
 constexpr double kLookRadPerPx = 0.0025;   // controller.js LOOK_RAD_PER_PX
@@ -313,6 +318,9 @@ KbSample ReadKeyboard(bool ui, const std::array<bool, kCodeCount>& scriptKeys, i
     prevQuit = quit;
     s.fish.sx = x;
     s.fish.sy = y;
+    s.toolKey = h(Shake) && !ui;
+    s.mousePxX = kb.mouseDx;
+    s.mousePxY = kb.mouseDy;
     s.fish.mouseDx = kb.mouseDx * kLookRadPerPx;
     s.fish.mouseDy = kb.mouseDy * kLookRadPerPx;
     kb.mouseDx = kb.mouseDy = 0;
@@ -352,6 +360,7 @@ struct ScriptEvent {
     uint32_t buttons = 0;
     float sx = 0, sy = 0;
     bool stick = false, shake = false, wheel = false;
+    float mdx = 0, mdy = 0;  // MDX= / MDY=: mouse movement in pixels per frame while the event is active
     std::vector<int> keys;   // scheme input codes (KEY_* / MOUSE_*)
 };
 
@@ -384,6 +393,8 @@ uint32_t ParseButton(const std::string& t, ScriptEvent& e) {
     }
     if (t.rfind("SX=", 0) == 0) { e.stick = true; e.sx = std::strtof(t.c_str() + 3, nullptr); return 0; }
     if (t.rfind("SY=", 0) == 0) { e.stick = true; e.sy = std::strtof(t.c_str() + 3, nullptr); return 0; }
+    if (t.rfind("MDX=", 0) == 0) { e.mdx = std::strtof(t.c_str() + 4, nullptr); return 0; }
+    if (t.rfind("MDY=", 0) == 0) { e.mdy = std::strtof(t.c_str() + 4, nullptr); return 0; }
     RT_LOG(RT_TAG_HLE) << "[opuc] OPUC_INPUT_SCRIPT: unknown token '" << t << "'" << std::endl;
     return 0;
 }
@@ -458,6 +469,8 @@ struct Sample {
     float sx = 0, sy = 0;
     bool shake = false, shakePulse = false, nunchukShake = false;
     bool ui = false;
+    bool toolKey = false, padShake = false;
+    double mousePxX = 0, mousePxY = 0;
     OpucFishing::PadIn fish;
 };
 
@@ -483,6 +496,7 @@ Sample Poll() {
             s.hold |= e.buttons;
             if (e.stick) { s.sx += e.sx; s.sy += e.sy; }
             if (e.shake) s.shakePulse = true;
+            if (e.mdx != 0 || e.mdy != 0) { std::lock_guard<std::mutex> l(kb.m); kb.mouseDx += e.mdx; kb.mouseDy += e.mdy; }
             for (int c : e.keys) scriptKeys[c] = true;
             if (e.wheel && !g.wheelFired[i]) { scriptWheel++; g.wheelFired[i] = true; }
         }
@@ -496,6 +510,9 @@ Sample Poll() {
     s.shakePulse |= k.shakePulse;
     s.nunchukShake |= k.nunchukShake;
     s.fish = k.fish;
+    s.toolKey = k.toolKey;
+    s.mousePxX = k.mousePxX;
+    s.mousePxY = k.mousePxY;
 
     OpenGamepad();
     if (g.pad) {
@@ -512,7 +529,7 @@ Sample Poll() {
         if (b(SDL_GAMEPAD_BUTTON_DPAD_LEFT)) s.hold |= kLeft;
         if (b(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) s.hold |= kRight;
         if (b(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) s.hold |= kC;
-        if (b(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) s.shake = true;
+        if (b(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) { s.shake = true; s.padShake = true; }
         if (SDL_GetGamepadAxis(g.pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000) s.hold |= kZ;
         const float ax = SDL_GetGamepadAxis(g.pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
         const float ay = -SDL_GetGamepadAxis(g.pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
@@ -530,7 +547,176 @@ void WriteF32(uint32_t at, float v) {
     Memory::Write32(at, bits);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Held tools: the pickaxe (CharaDigup) and the bug nets (CharaCapture) swing on a WiiMotion gesture, not on a button
+// (vault entities/gathering.md §1c, entities/pad-input "Gestures"). The CanEnters (pickaxe 80031f5c, nets 8002f620)
+// read the gesture byte WiiMotion +0x1320: 2 -> record 1 (the overhead swing), 4 -> record 2, 8 -> record 3 (the
+// sideways ones). The held 6 Hz shake of the scheme trips all three detectors at random and the publish quirk eats
+// most of them, so while a tool is in the hand the shake key sends one clean gesture per stroke instead:
+//   hold RMB (or L) and drag the mouse top to bottom: the 40 ms tip pull (0, +2.6, -1) g -> detector 0 -> 2;
+//   hold RMB and drag sideways: 15 ms at (+-0.8, -1, 1.5) g -> detector 1 (x > 0, bit 8) or 2 (x < 0, bit 4);
+//   a click (released within 20 frames without a stroke) or the gamepad's right shoulder: the overhead swing.
+// One swing per stroke: a long drag swings once; an upward drag rearms the overhead swing (chopping: down, up, down),
+// a sideways swing rearms the other side (sweeping back and forth), a new press rearms all.
+// Checked by script (OPUC_TRACE_INPUT): each stroke publishes its gesture and the CanEnter takes it, pickaxe and net.
+// ^[inferred: drag right -> x > 0 -> record 3; which of records 2 / 3 sweeps left-to-right is not verified]
+constexpr int kToolStrokePx = 40, kToolClickFrames = 20, kToolCooldown = 10;
+constexpr uint32_t kRecordsPickaxe = 0x805012E8, kRecordsNet = 0x80501158;
+
+struct Tool {
+    OpucFishing::MotionSource motion;
+    std::atomic<uint32_t> chara{0};    // the owner CharaObj of the last CanEnter / Update (work +0x13E8)
+    std::atomic<uint64_t> seen{0};     // the KPAD frame of that call
+    bool keyPrev = false, padPrev = false, stroked = false;
+    bool armed[4] = {true, true, true, true};  // per record: a stroke fires once until it is rearmed
+    double ax = 0, ay = 0;
+    int pressFrames = 0, cooldown = 0;
+    uint32_t lastHeld = 0;
+    std::vector<OpucFishing::V3> acc;
+} tool;
+
+bool ToolPtr(uint32_t p) { return (p >= 0x80000000u && p < 0x81800000u) || (p >= 0x90000000u && p < 0x94000000u); }
+
+// The held item id of the CharaObj that owns the last tool WiiMotion / CanEnter / Update call (CharaObj::GetHeldItemId
+// 8006b614: *(*(chara + 0x16C4) + 0x9C)): 1 pickaxe, 2 net, 3 broken net. A tool polls its CanEnter every field frame
+// while it is in the hand (and runs Update while it swings), so a stale owner means no tool.
+uint32_t HeldTool() {
+    if (kb.frame - tool.seen.load() > 120) return 0;
+    try {
+        const uint32_t ch = tool.chara.load();
+        if (!ToolPtr(ch)) return 0;
+        const uint32_t use = Memory::Read32(ch + 0x16C4);
+        if (!ToolPtr(use)) return 0;
+        const uint32_t id = Memory::Read32(use + 0x9C);
+        return id >= 1 && id <= 3 ? id : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+// 0 nothing, 1 overhead, 2 sideways with x < 0, 3 sideways with x > 0 (the gesture records they pick).
+void ToolSwing(int rec) {
+    using OpucFishing::Timeline;
+    if (rec == 1) tool.motion.Play(OpucFishing::RodJerk());
+    else tool.motion.Play(Timeline{{15, {rec == 3 ? 0.8f : -0.8f, -1.0f, 1.5f}}});
+    tool.cooldown = kToolCooldown;
+    if (g.trace) RT_LOG(RT_TAG_HLE) << "[opuc] tool: swing record " << rec << " (held " << tool.lastHeld << ")" << std::endl;
+}
+
+// Per KPADRead: true while a tool is in the hand and the field has the controls; fills n samples (oldest first).
+bool ToolFrame(const Sample& s, int n) {
+    const uint32_t held = s.ui ? 0 : HeldTool();
+    if (held != tool.lastHeld) {
+        if (g.trace) RT_LOG(RT_TAG_HLE) << "[opuc] tool: held " << held << std::endl;
+        tool.lastHeld = held;
+        tool.keyPrev = tool.padPrev = tool.stroked = false;
+        tool.ax = tool.ay = 0;
+    }
+    if (!held) return false;
+    if (tool.cooldown > 0 && !tool.motion.Playing()) tool.cooldown--;
+    const bool ready = !tool.motion.Playing() && tool.cooldown == 0;
+    if (s.toolKey && !tool.keyPrev) {
+        tool.ax = tool.ay = 0; tool.pressFrames = 0; tool.stroked = false;
+        for (bool& a : tool.armed) a = true;
+    }
+    auto fire = [&](int rec) {
+        ToolSwing(rec);
+        tool.stroked = true;
+        tool.armed[rec] = false;
+        if (rec == 2) tool.armed[3] = true;
+        if (rec == 3) tool.armed[2] = true;
+        tool.ax = tool.ay = 0;
+    };
+    if (s.toolKey) {
+        tool.pressFrames++;
+        tool.ax += s.mousePxX;
+        tool.ay += s.mousePxY;
+        const double adx = std::fabs(tool.ax), ady = std::fabs(tool.ay);
+        if (ady >= kToolStrokePx && ady > adx) {
+            if (tool.ay > 0) { if (ready && tool.armed[1]) fire(1); else if (!tool.armed[1]) tool.ax = tool.ay = 0; }
+            else { tool.armed[1] = true; tool.ax = tool.ay = 0; }   // the upstroke rearms
+        } else if (adx >= kToolStrokePx && adx > ady) {
+            const int rec = tool.ax > 0 ? 3 : 2;
+            if (ready && tool.armed[rec]) fire(rec);
+            else if (!tool.armed[rec]) tool.ax = tool.ay = 0;
+        }
+    } else if (tool.keyPrev && !tool.stroked && tool.pressFrames <= kToolClickFrames && ready) {
+        ToolSwing(1);
+    }
+    if (s.padShake && !tool.padPrev && ready) ToolSwing(1);
+    tool.keyPrev = s.toolKey;
+    tool.padPrev = s.padShake;
+    tool.motion.Frame(n, tool.acc);
+    return true;
+}
+
 } // namespace
+
+// The tools' CanEnter (r3 = pMoveNode; its sub-user work = *(*(r3) + 0x18), the CharaDigup / CharaCapture work) and
+// CharaDigup::Update (r3 = work): remember the owner CharaObj, so the virtual remote knows a tool is in the hand.
+namespace {
+void ToolSeen(uint32_t work) {
+    if (!ToolPtr(work)) return;
+    const uint32_t ch = Memory::Read32(work + 0x13E8);
+    if (ToolPtr(ch)) { tool.chara.store(ch); tool.seen.store(kb.frame); }
+}
+void ToolTraceEnter(const char* what, uint32_t work, uint32_t ret) {
+    if (!g.trace || !ToolPtr(work)) return;
+    const uint32_t flags = Memory::Read8(work + 0x6C + 0x1320), rec = Memory::Read32(work + 0x68);
+    if (flags || ret)
+        RT_LOG(RT_TAG_HLE) << "[opuc] tool: " << what << " gesture " << flags << " -> " << ret << " ("
+                           << (rec == kRecordsPickaxe ? "pickaxe" : rec == kRecordsNet ? "net" : "?") << ")" << std::endl;
+}
+uint32_t MoveNodeWork(uint32_t node) {
+    if (!ToolPtr(node)) return 0;
+    const uint32_t n0 = Memory::Read32(node);
+    return ToolPtr(n0) ? Memory::Read32(n0 + 0x18) : 0;
+}
+}  // namespace
+
+extern "C" void OpucTool_DigupCanEnter(CpuContext* ctx) {
+    const uint32_t work = MoveNodeWork(ctx->gpr[3]);
+    try { ToolSeen(work); } catch (...) {}
+    GuestFunctions::NextTranslation(0x80031F5C)(ctx);
+    try { ToolTraceEnter("pickaxe CanEnter", work, ctx->gpr[3]); } catch (...) {}
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80031F5C, OpucTool_DigupCanEnter, "OpucTool_DigupCanEnter");
+
+extern "C" void OpucTool_CaptureCanEnter(CpuContext* ctx) {
+    const uint32_t work = MoveNodeWork(ctx->gpr[3]);
+    try { ToolSeen(work); } catch (...) {}
+    GuestFunctions::NextTranslation(0x8002F620)(ctx);
+    try { ToolTraceEnter("net CanEnter", work, ctx->gpr[3]); } catch (...) {}
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8002F620, OpucTool_CaptureCanEnter, "OpucTool_CaptureCanEnter");
+
+extern "C" void OpucTool_DigupUpdate(CpuContext* ctx) {
+    try { ToolSeen(ctx->gpr[3]); } catch (...) {}
+    GuestFunctions::NextTranslation(0x80030988)(ctx);
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80030988, OpucTool_DigupUpdate, "OpucTool_DigupUpdate");
+
+// WiiMotion::Update(wm) 8002626c: its callers are the nets' CanEnter body (800305e0), the pickaxe's CanEnter
+// (80031f5c), CharaDigup::Update (80030988) and CharaFishing::Update. A tool's WiiMotion sits at work +0x6C with the
+// motion records at work +0x68, so the records tell a pickaxe / net call from the fishing one. Marks the tool as held
+// and traces every gesture the game publishes for it.
+extern "C" void OpucTool_WiiMotionUpdate(CpuContext* ctx) {
+    const uint32_t wm = ctx->gpr[3], work = wm - 0x6C;
+    uint32_t rec = 0;
+    try {
+        rec = ToolPtr(work) ? Memory::Read32(work + 0x68) : 0;
+        if (rec == kRecordsPickaxe || rec == kRecordsNet) { ToolSeen(work); }
+    } catch (...) {}
+    GuestFunctions::NextTranslation(0x8002626C)(ctx);
+    try {
+        if (g.trace && (rec == kRecordsPickaxe || rec == kRecordsNet)) {
+            const uint32_t gesture = Memory::Read8(wm + 0x1320);
+            if (gesture) RT_LOG(RT_TAG_HLE) << "[opuc] tool: gesture " << gesture << " published (" << (rec == kRecordsNet ? "net" : "pickaxe") << ")" << std::endl;
+        }
+    } catch (...) {}
+}
+REGISTER_NATIVE_WRAPPER_AS(0x8002626C, OpucTool_WiiMotionUpdate, "OpucTool_WiiMotionUpdate");
+
 
 // WPADProbe (802c30f0): channel 0 has a remote with a Nunchuk (WPAD_DEV_FREESTYLE = 1), the others nothing.
 extern "C" int32_t WPADProbe_OPUC(uint32_t chan, uint32_t typePtr) {
@@ -580,7 +766,9 @@ extern "C" int32_t KPADRead_OPUC(uint32_t chan, uint32_t buf, uint32_t length) {
         if (fo.right) hold |= kRight;
     }
 
-    const Vec3 ra = RemoteAccel(s.shake && !fishing, s.shakePulse && !fishing, kb.frame);
+    // A held pickaxe / net owns the shake key and the accelerometer (ToolFrame); the vacuum keeps the shake.
+    const bool toolOn = !fishing && ToolFrame(s, n);
+    const Vec3 ra = RemoteAccel(s.shake && !fishing && !toolOn, s.shakePulse && !fishing && !toolOn, kb.frame);
     const Vec3 na = NunchukAccel(s.nunchukShake, kb.frame);
     float raValue = 0;
     // acc_speed (+0x1C) is |acc - previous sample|: WiiMotion's still-sample test reads it (0 < speed < 0.02).
@@ -589,6 +777,9 @@ extern "C" int32_t KPADRead_OPUC(uint32_t chan, uint32_t buf, uint32_t length) {
     if (fishing)
         for (int i = 0; i < n; ++i)
             if (static_cast<size_t>(n - 1 - i) < fishAcc.size()) { const OpucFishing::V3& f = fishAcc[n - 1 - i]; acc[i] = {f.x, f.y, f.z}; }
+    if (toolOn)
+        for (int i = 0; i < n; ++i)
+            if (static_cast<size_t>(n - 1 - i) < tool.acc.size()) { const OpucFishing::V3& f = tool.acc[n - 1 - i]; acc[i] = {f.x, f.y, f.z}; }
     std::vector<float> speed(static_cast<size_t>(n), 0.f);
     for (int i = n - 1; i >= 0; --i) {   // oldest (n - 1) to newest (0)
         const Vec3& v = acc[i];

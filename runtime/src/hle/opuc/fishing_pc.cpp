@@ -692,6 +692,44 @@ float LureDistance(const CpuContext& c, uint32_t work) {
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+// OPUC_TRACE_FISHING: the lure flight (state 1) relative to the player each frame, the prediction it was cast with
+// and where it came down (the float state 2, or the flight's end), for fitting FlightDistance.
+void FlightTrace(const CpuContext& c, uint32_t work) {
+    static int lastState = -1, frame = 0;
+    static bool landed = false;
+    const int state = static_cast<int>(Memory::Read32(work + 0x1C));
+    const uint32_t lure = Memory::Read32(work + 0xD4), chara = Memory::Read32(work + 0x1458);
+    float h = -1, dy = 0;
+    if (GuestPtr(lure) && GuestPtr(chara)) {
+        const uint32_t a = Call(c, kGetWorldTranslationPtr, {lure}), b = Call(c, kGetWorldTranslationPtr, {chara});
+        if (GuestPtr(a) && GuestPtr(b)) {
+            const float dx = F32(a) - F32(b), dz = F32(a + 8) - F32(b + 8);
+            h = std::sqrt(dx * dx + dz * dz);
+            dy = F32(a + 4) - F32(b + 4);
+        }
+    }
+    const uint32_t flt = Memory::Read32(work + 0x0C);
+    const int fs = GuestPtr(flt) ? static_cast<int>(Memory::Read32(flt + 8)) : -1;
+    if (state == 1 && lastState != 1) {
+        frame = 0;
+        landed = false;
+        RT_LOG(RT_TAG_HLE) << "[opuc] fishing flight start bar " << g.castBar << " predicted " << DistOfBar(g.castBar) << " effortTop "
+                           << g.effortTop << " rodPower " << F32(Memory::Read32(work + 0x8C) + 4) << " line " << F32(work + 0x50) << std::endl;
+    }
+    if (state == 1) {
+        RT_LOG(RT_TAG_HLE) << "[opuc] fishing flight f " << frame << " h " << h << " dy " << dy << " fs " << fs << std::endl;
+        if (fs == 2 && !landed) {
+            landed = true;
+            RT_LOG(RT_TAG_HLE) << "[opuc] fishing flight landed f " << frame << " h " << h << " dy " << dy << " dist "
+                               << std::sqrt(h * h + dy * dy) << std::endl;
+        }
+        frame++;
+    } else if (lastState == 1 && !landed) {
+        RT_LOG(RT_TAG_HLE) << "[opuc] fishing flight ended state " << state << " f " << frame << " h " << h << " dy " << dy << std::endl;
+    }
+    lastState = state;
+}
+
 // Line never breaks (Play tab fish_unbreakable): line HP (+0x40) kept at 5 % of its max (+0x44) or more, so the
 // fight never reaches HP 0 (state 5); in the flight and the fight the line length (+0x50) is raised for the update
 // when the lure is about to pass it, so "distance > line length" (state 2 in the flight, 5 in the fight) never
@@ -755,6 +793,7 @@ extern "C" void OpucFishing_Update(CpuContext* ctx) {
     if (restoreLen > 0) Memory::WriteFloat32(work + 0x50, restoreLen);
     try {
         OpucFishing::AfterUpdate(c, work);
+        if (OpucFishing::g.trace) OpucFishing::FlightTrace(c, work);
         if (OpucFishing::Dev().remoteGraph) OpucFishing::SnapshotGraph(work);
     } catch (...) {
     }

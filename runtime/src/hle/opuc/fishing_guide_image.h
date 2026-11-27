@@ -247,7 +247,9 @@ inline std::vector<GuideRow> GuideRows(uint32_t id) {
     case 0xA0049A: return {{"cast_release", "Release Button", false}, {nullptr, "While Charging", true}};
     case 0xA0049B: return {{"hook", "Raise", false}};
     case 0xA0049C: return {{"cast_hold", "Reel in", false}, {"lean", "Rod Control", false}, {"raise", "Raise", false}};
-    case 0xA00498: case 0xA0049D: return {{"hook", "Swing", false}};  // the tools swing on a remote shake (RMB)
+    // The pickaxe / nets: hold RMB and drag the mouse (wiimote_opuc.cpp ToolFrame); the vacuum: the held shake (RMB).
+    case 0xA00498: return {{"hook", "Hold Button", false}, {nullptr, "While Swinging", true}};
+    case 0xA0049D: return {{"hook", "Swing", false}};
     case 0xA0049E: return {{"press", "Press", false}};               // the trap's A press is Interact (E)
     default: return {};
     }

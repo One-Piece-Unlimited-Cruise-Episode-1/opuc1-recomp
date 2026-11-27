@@ -163,14 +163,18 @@ inline double CastSpeed(double power, double cp) {
     if (power < 12) return 0;
     return cp * ((0.5 + 1.4286 * std::max(0.0, 50 - cp) / 100) * (power - 12) / 15) + 15;
 }
-// The lure flight fitted to Dolphin (Play tab fishing.js FLIGHT): horizontal speed x 0.99 a frame, gravity 48,
-// launch 0.95 * speed at 45 deg from 3.0 above the feet and 0.3 ahead, until it falls to dy (water below the feet).
-// ^[inferred: the game's line simulation 80032c64 / 80032b08 is not traced]
+// The lure flight as the recompilation traced it (OPUC_TRACE_FISHING, Fst 11995, rod power 75, speeds 43-77; vault
+// entities/gathering.md §1l): launched at the cast speed at 45 deg from 2.635 above the feet, each frame the lure
+// moves by its velocity, then the horizontal speed loses 10 / 60^2 and the vertical 49 / 60^2 (constant, no drag
+// factor); it lands when it falls to dy (the water below the feet). Every landing matched within 0.35 m. The Play
+// tab's FLIGHT fit (x 0.99 a frame, 0.95 launch, gravity 48) came from Dolphin casts under 17 m and fell short on
+// long ones (a 62.5 m cast predicted 43.8 m).
 inline double FlightDistance(double speed, double dy) {
-    const double v = 0.95 * speed * std::sqrt(0.5);
-    double x = 0.3, y = 3.0, vx = v, vy = v;
-    for (int i = 0; i < 600; ++i) {
-        vx *= 0.99; vy = vy - 48.0 / 60; x += vx / 60; y += vy / 60;
+    const double v = speed / 60 * std::sqrt(0.5);
+    double x = 0, y = 2.635, vx = v, vy = v;
+    for (int i = 0; i < 2000; ++i) {
+        x += vx; y += vy;
+        vx = std::max(0.0, vx - 10.0 / 3600); vy -= 49.0 / 3600;
         if (vy < 0 && y <= dy) break;
     }
     return std::hypot(x, y);

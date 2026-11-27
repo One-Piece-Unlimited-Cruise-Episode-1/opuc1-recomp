@@ -6,17 +6,17 @@ The hand-off between sessions. Read this first; update it last. One iteration of
 <!-- metrics:begin (tools/status.mjs) -->
 ```json
 {
-  "measured": "2026-11-22T18:27:43.179Z",
-  "mapStarts": 18669,
+  "measured": "2026-11-27T23:29:45.696Z",
+  "mapStarts": 18670,
   "mapNamed": 6337,
   "mapSdkNamed": 1097,
-  "rebindMappedDistinct": 404,
-  "rebindUnbound": 85,
-  "rebindTodoDistinct": 64,
-  "translatedFunctions": 18849,
+  "rebindMappedDistinct": 401,
+  "rebindUnbound": 62,
+  "rebindTodoDistinct": 1,
+  "translatedFunctions": 18850,
   "translateOk": true,
   "compileErrors": 0,
-  "compileLastLine": "[32/33] Linking CXX executable opuc1-recomp.exe",
+  "compileLastLine": "[2/3] Linking CXX executable opuc1-recomp.exe",
   "executables": [
     "opuc1-recomp.exe"
   ],
@@ -151,7 +151,21 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   shorter than a frame still count) and are dropped while the runtime overlay blocks input. The overlay no longer opens
   its exit prompt on Esc (F10 top bar / window close instead). The first SDL gamepad still works as before.
   `OPUC_INPUT_SCRIPT` also takes `KEY_<SDL scancode name>` (e.g. `KEY_Left Shift`), `MOUSE_LEFT|MIDDLE|RIGHT` and
-  `WHEEL` tokens that go through the scheme; `OPUC_TRACE_INPUT=1` logs hold-word / ui changes and shake pulses.
+  `WHEEL` tokens that go through the scheme, and `MDX=<px>` / `MDY=<px>` mouse movement per frame; `OPUC_TRACE_INPUT=1`
+  logs hold-word / ui changes, shake pulses and the held tools' swings.
+  - Pickaxe and bug nets (2026-11-27, not in the game; `ToolFrame`): they swing on a WiiMotion gesture, and the held
+    6 Hz shake tripped the three detectors at random. With one in the hand, hold RMB (or L) and drag the mouse 40 px:
+    down → the 40 ms tip pull (0, +2.6, −1) g → gesture 2 (record 1, overhead); right / left → 15 ms at (±0.8, −1, 1.5) g
+    → gesture 8 / 4 (records 3 / 2). One swing per stroke (an upstroke or the other side rearms); a click or the pad's
+    right shoulder is the overhead swing. Tool in hand = the owner CharaObj (work +0x13E8) of the last
+    `WiiMotion::Update` 8002626c / CanEnter (pickaxe 80031f5c, nets 8002f620) / `CharaDigup::Update` 80030988 call,
+    held id 1–3. The vacuum keeps the shake. PlayGuide 0xA00498 reads "[RMB] Hold Button / While Swinging". Checked
+    (scripted, Fst): pickaxe and net, down / right / left / click / long downstroke, each published and accepted by the
+    CanEnter, the long stroke once. Not checked: which sideways record sweeps which way (frames do not tell).
+    Adding a native wrapper on a function the translator already dispatches needs `build.ps1 -Stage translate` (the
+    runtime otherwise stops with "Stale generated indirect dispatch winner").
+  - Test helpers (dev_menu.cpp, at the first pause close with `OPUC_TEST_WARP`): `OPUC_TEST_ROD=1` the max rod,
+    `OPUC_TEST_GIVE="1,3:1"` items silently (`id:extra0` through an ItemRef; 3:1 = the Bug-Catcher Net).
 - PC button art (2026-11-26, ported from the Play tab's play/ui/pcart.js; not in the game; `[game] pc_button_art`,
   F10 > Game): the 48 pictures that show a Wii Remote / Nunchuk button (tutorial reminders 0xA00050–56 and the
   `[icon:k]` pictures, the window A prompt 0xA00000 / 01, the check bubbles 0xA00490 / 93 / 94 / 95, the PauseMenu,
@@ -169,7 +183,10 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   (scripted runs): the talk window's E prompt, "Tutorials / Shift ↓ / Dashing", the dash tutorial window with one
   Shift icon, "Shift Zoom Map", "X Discard" / "Shift Arrange", "E Sunny" at the Fst camp point (OPUC_TEST_WARP);
   with the switch off the game's pictures and text. Not seen on screen: the other tutorial reminders and icons, the
-  other bubbles and strips (built the same way; the generator's replay check covers their geometry).
+  other bubbles and strips (built the same way; the generator's replay check covers their geometry). 2026-11-27:
+  `com_huri` 0xA00204 (23 px tall) got a bigger key than `com_a` 0xA00202 (20 px), so RMB drew larger than LMB in the
+  Status skill cells and the Break Rush rows; pcart.js sizes it as a 20-px picture (`fh: 20`), both are 16 × 21 now
+  (seen on the Status page).
 - PC fishing (2026-11-26, ported from the Play tab's play/fishing.js, ui/pcguide.js, ui/keyglyph.js; not in the game):
   `hle/opuc/fishing_pc.cpp` (controls, assist HUD, messages), `fishing_motion.h` (throw / jerk / tilt timelines,
   AnalyzeSwing, the fitted flight), `pc_pictures.cpp` + `fishing_guide_image.h` (PC PlayGuide pictures), `gx_texel.h`
@@ -178,7 +195,9 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   CharaFishing is found by wrapping `CharaFishing::Update` 80037a60 (state +0x1C, step +0x24, line +0x50).
   - Simple input (default): hold LMB in the wind-up and the power bar swings 0 → 1 → 0 over 2 s; release plays a rod
     throw into the accelerometer (3.4 g for 100–300 ms, harder past that, the top set per rod so a full bar lands
-    1.15 × the line) with A held and let go in the follow-through; RMB the 40 ms hook jerk; hold LMB to reel; A / D and
+    1.15 × the line) with A held and let go in the follow-through (the predicted distance uses the traced flight:
+    the cast speed at 45° from 2.635 up, −10 / −49 u/s² horizontal / vertical; vault gathering §1l. The old Play-tab fit
+    fell 6–19 m short on long casts; now 6 casts from 27 to 98 m land within 1.2 m of the bar's number); RMB the 40 ms hook jerk; hold LMB to reel; A / D and
     the mouse sideways lean, W raises; Space / Backspace reels a line in, and in state 0 sends D-pad Right (Unequip).
     Remote input (`[game] fishing_remote_input`): the mouse moves the remote, RMB with LMB held throws.
   - Assist (`[game] fishing_assist`): two PlayStatus GaugeSP layouts and a GaugeHP bound to StatusGauges in low memory
