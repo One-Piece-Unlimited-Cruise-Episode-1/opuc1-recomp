@@ -23,7 +23,10 @@ internal static class DiscTool
         string? nodToolBin, IInstallReporter reporter, CancellationToken cancellationToken)
     {
         if (!File.Exists(isoPath)) throw new FileNotFoundException("The disc image does not exist.", isoPath);
-        var nodTool = nodToolBin ?? await NodToolProvider.ResolveAsync(workspace, cancellationToken);
+        // A packaged setup always passes the bundled nodtool. Only a plain git checkout downloads it, and
+        // does so with curl: HttpClient would pull .NET's GSSAPI shim into this Native AOT binary, which
+        // Apple's classic linker refuses to link for x86_64.
+        var nodTool = nodToolBin ?? await NodToolProvider.ResolveAsync(workspace, DownloadWithCurlAsync, cancellationToken);
 
         // `nodtool info` only decodes the disc/partition headers (milliseconds); `nodtool extract` copies the whole
         // data partition. The game id picks the release, so a wrong disc fails fast and an existing extraction is only
@@ -136,7 +139,11 @@ internal static class DiscTool
         return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
-    private static async Task<string> RunAsync(string nodTool, string[] arguments, CancellationToken cancellationToken)
+    private static Task DownloadWithCurlAsync(string url, string destination, CancellationToken cancellationToken) =>
+        RunAsync("curl", ["-fsSL", "--retry", "3", "-o", destination, url], cancellationToken, $"curl download of {url}");
+
+    private static async Task<string> RunAsync(string nodTool, string[] arguments, CancellationToken cancellationToken,
+        string? label = null)
     {
         var startInfo = new System.Diagnostics.ProcessStartInfo(nodTool)
         {
@@ -155,7 +162,7 @@ internal static class DiscTool
         if (process.ExitCode != 0)
         {
             throw new InvalidOperationException(
-                $"nodtool {arguments[0]} failed (exit {process.ExitCode}): {stderr}{stdout}".Trim());
+                $"{label ?? "nodtool " + arguments[0]} failed (exit {process.ExitCode}): {stderr}{stdout}".Trim());
         }
         return stdout;
     }

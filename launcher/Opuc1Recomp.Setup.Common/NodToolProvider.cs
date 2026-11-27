@@ -16,7 +16,16 @@ public static class NodToolProvider
 {
     public const string Version = "v2.0.0-alpha.10";
 
-    public static async Task<string> ResolveAsync(string workspace, CancellationToken cancellationToken)
+    public static Task<string> ResolveAsync(string workspace, CancellationToken cancellationToken) =>
+        ResolveAsync(workspace, DownloadWithHttpClientAsync, cancellationToken);
+
+    /// <summary>
+    /// The same, downloading with <paramref name="download"/> (url, destination file, cancellation). The
+    /// Native AOT Linux/macOS setup passes a curl-based one: referencing HttpClient would link .NET's
+    /// GSSAPI shim (libSystem.Net.Security.Native), which Apple's classic linker rejects for x86_64.
+    /// </summary>
+    public static async Task<string> ResolveAsync(string workspace,
+        Func<string, string, CancellationToken, Task> download, CancellationToken cancellationToken)
     {
         var cacheName = OperatingSystem.IsWindows() ? "nodtool.exe" : "nodtool";
         var cachePath = Path.Combine(workspace, "launcher", "artifacts", cacheName);
@@ -26,13 +35,7 @@ public static class NodToolProvider
 
         Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
         var tempPath = cachePath + ".tmp";
-        using (var http = new HttpClient())
-        using (var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
-        {
-            response.EnsureSuccessStatusCode();
-            await using var fileStream = File.Create(tempPath);
-            await response.Content.CopyToAsync(fileStream, cancellationToken);
-        }
+        await download(url, tempPath, cancellationToken);
         File.Move(tempPath, cachePath, overwrite: true);
         if (!OperatingSystem.IsWindows())
         {
@@ -42,6 +45,16 @@ public static class NodToolProvider
                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
         }
         return cachePath;
+    }
+
+    private static async Task DownloadWithHttpClientAsync(string url, string destination,
+        CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient();
+        using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var fileStream = File.Create(destination);
+        await response.Content.CopyToAsync(fileStream, cancellationToken);
     }
 
     private static string AssetName()
