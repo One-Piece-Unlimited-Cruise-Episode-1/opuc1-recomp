@@ -85,6 +85,8 @@ uint64_t s_copyFrame = 0;
 void invalidate_bindings() noexcept {}
 void invalidate_sources() noexcept {}
 uint64_t current_bind_generation() noexcept { return 1; }
+// The tests keep every copy texture (s_copyTextures has no budget), so the render-target sizing is a no-op.
+void fit_copy_cache_to_render_target(u32, u32) noexcept {}
 GXState::CopyTextureRef resolve_copy_texture(const GXState::CopyTextureKey& key) noexcept {
   auto& ref = s_copyTextures[key];
   if (!ref.handle) {
