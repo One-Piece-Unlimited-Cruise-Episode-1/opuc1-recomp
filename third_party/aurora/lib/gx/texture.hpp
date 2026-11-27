@@ -35,6 +35,9 @@ constexpr uint64_t ObjectCacheIdleFrames = 600;
 constexpr bool AsyncTextureReplacements = true;
 constexpr uint32_t ReplacementThumbnailDim = 64;
 constexpr uint64_t ReplacementPublishBudgetBytes = 12ull * 1024ull * 1024ull;
+// Superseded EFB copies the copy cache keeps, counted in full-render-target RGBA8 copies (see
+// fit_copy_cache_to_render_target). Never below gfx::RenderTextureCacheLimits.bytes.
+constexpr uint64_t CopyCacheRenderTargetCopies = 4;
 
 size_t texture_source_size(u32 format, u32 width, u32 height, u32 mipCount) noexcept;
 size_t tlut_source_size(u16 numEntries) noexcept;
@@ -48,6 +51,13 @@ void end_frame() noexcept;
 void shutdown() noexcept;
 
 GXState::CopyTextureRef resolve_copy_texture(const GXState::CopyTextureKey& key) noexcept;
+// Copy textures are allocated at the scaled render size, but the copy cache budget is a fixed byte count
+// sized for native resolution. At a high internal resolution one full-frame copy is larger than that
+// budget, and an oversized entry is freed as soon as it is superseded, so a game that copies two formats
+// (or sizes) into one destination every frame re-creates a full-size render texture for each copy.
+// Called with the scene render target size before a copy is resolved; raises the budget to
+// CopyCacheRenderTargetCopies full-frame RGBA8 copies when that is larger.
+void fit_copy_cache_to_render_target(u32 width, u32 height) noexcept;
 
 // Internal resolvers exposed for cache tests.
 gfx::TextureHandle resolve_static_texture(const GXTexObj_& obj);

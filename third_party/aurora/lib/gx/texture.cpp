@@ -138,6 +138,15 @@ gfx::LruCache<GXState::CopyTextureKey, GXState::CopyTextureRef> s_copyCache{
     gfx::RenderTextureCacheLimits,
     retire_copy_texture,
 };
+// The copy cache budget is the larger of the base budget (RenderTextureCacheLimits, or a test override)
+// and room for CopyCacheRenderTargetCopies full-frame copies at the current render target size.
+uint64_t s_copyCacheBaseBudget = gfx::RenderTextureCacheLimits.bytes;
+uint64_t s_copyCacheRenderTargetBytes = 0;
+
+void apply_copy_cache_budget() {
+  s_copyCache.set_budget(
+      std::max(s_copyCacheBaseBudget, s_copyCacheRenderTargetBytes * texture::CopyCacheRenderTargetCopies));
+}
 uint64_t s_frameCount = 0;
 uint64_t s_bindGeneration = 1;
 std::atomic<uint64_t> s_pendingInvalidations = 0;
@@ -578,6 +587,16 @@ bool use_replacement(std::optional<gfx::texture_replacement::ReplacementResult> 
 const TextureStats& texture_stats() noexcept { return s_stats; }
 
 namespace texture {
+void fit_copy_cache_to_render_target(u32 width, u32 height) noexcept {
+  const uint64_t bytes = static_cast<uint64_t>(width) * height * 4;
+  if (bytes == s_copyCacheRenderTargetBytes) {
+    return;
+  }
+  s_copyCacheRenderTargetBytes = bytes;
+  apply_copy_cache_budget();
+  update_cache_stats();
+}
+
 GXState::CopyTextureRef resolve_copy_texture(const GXState::CopyTextureKey& key) noexcept {
   ZoneScoped;
   auto* copy = s_copyCache.pin(key);
@@ -850,7 +869,9 @@ void end_frame() noexcept {
 
 void shutdown() noexcept {
   clear_copy_texture_cache();
-  s_copyCache.set_budget(gfx::RenderTextureCacheLimits.bytes);
+  s_copyCacheBaseBudget = gfx::RenderTextureCacheLimits.bytes;
+  s_copyCacheRenderTargetBytes = 0;
+  apply_copy_cache_budget();
   s_textureObjectCaches.clear();
   s_tlutObjectCaches.clear();
   s_replacementUsers.clear();
@@ -870,7 +891,8 @@ void set_content_cache_budget_for_testing(uint64_t bytes) noexcept {
 }
 
 void set_copy_cache_budget_for_testing(uint64_t bytes) noexcept {
-  s_copyCache.set_budget(bytes);
+  s_copyCacheBaseBudget = bytes;
+  apply_copy_cache_budget();
   update_cache_stats();
 }
 } // namespace texture

@@ -159,6 +159,8 @@ void copy_tex(const void* dest, GXBool clear, u32 copyControl) noexcept {
   const auto rect = map_logical_scissor(g_gxState.texCopySrc);
   const auto [dstWidth, dstHeight] = scale_copy_dst(g_gxState.texCopyDstWidth, g_gxState.texCopyDstHeight);
   const auto texCopyFmt = g_gxState.texCopyFmt;
+  const auto [targetWidth, targetHeight] = aurora::gfx::get_render_target_size();
+  texture::fit_copy_cache_to_render_target(targetWidth, targetHeight);
   const auto copy = texture::resolve_copy_texture({
       .dest = dest,
       .width = dstWidth,

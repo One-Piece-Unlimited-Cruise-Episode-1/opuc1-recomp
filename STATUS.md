@@ -118,6 +118,19 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
 - Frame pacing: OPUC waits for a GX draw-done callback (803ee194) that swaps the XFB and releases
   ALEngine::RunFrame. `hle/opuc/gx_opuc.cpp` HLEs GXSetDrawDone (802930e4) to drain GX and run the finish
   interrupt's work synchronously. The runtime's startup cover lifts at the first GXCopyDisp.
+- Gorge (vly) at a high internal resolution (2026-11-27): 60 → ~20 FPS at `resolution_multiplier = 8`, 60 FPS at 1;
+  Fst and the Sunny held 60 at 8. Cause: every frame on vly the game copies the full 640×480 EFB into the
+  screen-copy buffer twice, RGBA8 (fmt 6) and then I8 (fmt 1, the ShaderPRSepia post-effect, vault
+  entities/geometry); the Sunny does only the RGBA8 one. Aurora keys
+  copy textures by (dest, scaled size, format), so the two copies swap the pinned entry of one destination. Its
+  copy cache budget was a fixed 64 MB (`RenderTextureCacheLimits`) and an unpinned entry above the budget is freed
+  at once. At 8× the RGBA8 copy is 5120×3840×4 ≈ 79 MB, so it was re-created (Dawn texture allocation on the
+  FIFO thread) every frame: `aurora_end_frame_gx` waited ~34 ms in `fifo::drain` while neither the GPU (~35 %)
+  nor any CPU thread was saturated. Fix in `third_party/aurora` (`texture::fit_copy_cache_to_render_target`,
+  called from `copy_tex`): the copy budget is now max(64 MB, 4 full render-target RGBA8 copies). Measured with the
+  same save: 59–60 FPS on vly at 8×, `aurora_end_frame_gx` 0.02 ms. The shipped build links aurora from the
+  native prebuilt package, so the package (`launcher/Prepare-NativePrebuilt.ps1`) must be rebuilt for the fix to
+  reach an install. `g_offscreenCache` (recording.cpp) still uses the fixed 64 MB limit.
 - Diagnostics: `[opuc] status` once per second (copies/s, ProjProcess), `[opuc] dvd read` per file,
   `OPUC_TRACE_NATIVE=1` prints the hottest native call sites (finds polling loops), `run.ps1 -Shot` saves
   `build/logs/run.png`.
