@@ -5,6 +5,8 @@
 //   - the OPUC name must normalize to the MKWii symbol the upstream site was bound to, unless the address comes
 //     from projects/opuc1/rebind_overrides.tsv (then the override note is the evidence),
 //   - no two registrations may bind the same OPUC address.
+// An OPUC-native registration (no /*mkw:*/ marker) may also sit at an address listed in projects/opuc1/native_entries.tsv:
+//   slot  = code-free address below the first MAP entry, thunk = 4-aligned address inside a MAP entry (a merged `b` thunk).
 // Exit code 1 when any binding fails. Also prints the binding table with --list.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,6 +27,15 @@ for (const l of rd('projects/opuc1/MAP.txt').split('\n')) {
   const [a, n] = l.trim().split(/\s+/); if (!a || a.startsWith('#')) continue; starts.add(a.toUpperCase());
   if (n && !n.startsWith('0x')) opucName.set(a.toUpperCase(), n.startsWith('g_') ? norm(n.slice(2).replace(/__/g, '::').replace(/^::/, '__')) : n);
 }
+const firstStart = Math.min(...[...starts].map(a => parseInt(a, 16)));
+const nativeEntries = new Map();
+for (const l of rd('projects/opuc1/native_entries.tsv').split('\n')) { if (!l.trim() || l.startsWith('#')) continue; const [a, k, note] = l.split('\t'); nativeEntries.set(a.trim().toUpperCase(), { kind: (k ?? '').trim(), note: (note ?? '').trim(), used: false }); }
+const nativeProblem = (addr, e) => {
+  const v = parseInt(addr, 16);
+  if (e.kind === 'slot') return v < firstStart ? null : 'native_entries.tsv slot is not below the first MAP entry';
+  if (e.kind === 'thunk') return v > firstStart && v % 4 === 0 ? null : 'native_entries.tsv thunk is not a 4-aligned address inside a MAP entry';
+  return `native_entries.tsv kind '${e.kind}' is not slot or thunk`;
+};
 const overrides = new Map();
 for (const l of rd('projects/opuc1/rebind_overrides.tsv').split('\n')) { if (!l.trim() || l.startsWith('#')) continue; const [a, t, note] = l.split('\t'); overrides.set(a.toUpperCase(), { t: t.trim(), note: (note ?? '').trim() }); }
 
@@ -41,7 +52,9 @@ for (const f of files.sort()) {
     const [, macro, addrRaw, mkwRaw, sym] = m; const addr = addrRaw.toUpperCase(); const mk = mkwRaw?.toUpperCase();
     const problems = [];
     if (!mk) problems.push('no /*mkw:*/ marker (OPUC-native registration: check by hand)');
-    if (!starts.has(addr)) problems.push('not a function start in MAP.txt');
+    const ne = !mk && !starts.has(addr) ? nativeEntries.get(addr) : undefined;
+    if (ne) { ne.used = true; const p = nativeProblem(addr, ne); if (p) problems.push(p); }
+    else if (!starts.has(addr)) problems.push('not a function start in MAP.txt');
     const ov = mk && overrides.get(mk);
     const want = mk ? norm(mkw.get(mk) ?? '') : '';
     const have = opucName.get(addr) ?? '';
@@ -50,11 +63,13 @@ for (const f of files.sort()) {
     else if (want && have === want) evidence = `name: ${have}`;
     else if (mk) problems.push(`name mismatch: OPUC '${have || '?'}' vs MKWii '${want || '?'}'`);
     if (seen.has(addr)) problems.push(`also bound at ${seen.get(addr)}`); else seen.set(addr, `${rel} ${sym}`);
-    const okNative = !mk && problems.length === 1 && starts.has(addr);
+    const okNative = !mk && problems.length === 1 && (starts.has(addr) || !!ne);
+    if (okNative && ne) evidence = `${ne.kind}: ${ne.note}`;
     if (problems.length && !okNative) bad++;
     rows.push({ addr, mk: mk ?? '-', sym, file: rel, ok: !problems.length || okNative, evidence: evidence ?? problems.join('; ') });
   }
 }
 if (process.argv.includes('--list')) for (const r of rows.sort((a, b) => a.addr.localeCompare(b.addr))) console.log(`${r.ok ? 'ok ' : 'BAD'} ${r.addr} mkw:${r.mk} ${r.sym} ${r.file} :: ${r.evidence}`);
-console.log(JSON.stringify({ bindings: rows.length, ok: rows.length - bad, bad }));
+for (const [a, e] of nativeEntries) if (!e.used) { bad++; console.log(`BAD ${a} native_entries.tsv entry with no OPUC-native registration`); }
+console.log(JSON.stringify({ bindings: rows.length, ok: rows.filter(r => r.ok).length, bad }));
 process.exit(bad ? 1 : 0);

@@ -1,0 +1,23 @@
+# OPUC-native registrations (no /*mkw:*/ marker) at addresses that are not function starts in MAP.txt. Read by tools/check-bindings.mjs.
+# OPUCADDR<TAB>kind<TAB>note (cite main.dol)
+# slot:  no code at the address (outside every main.dol section, below the first MAP entry 80004000). The runtime registers a native
+#        there and stores the address where the game calls it through a pointer.
+# thunk: a single `b` instruction that tools/build-function-map.mjs merged into the entry before it (the previous word is also a `b`).
+#        The translator emits it as its own function (func_<addr>).
+80003FA0	slot	Dev list vtable DoDecision (runtime/src/hle/opuc/dev_menu.cpp kDevPageDecision)
+80003FB0	slot	Dev list vtable OnReactivate (dev_menu.cpp kDevPageOnReactivate)
+80003FC0	slot	Dev list vtable +0x50 RefreshRows (dev_menu.cpp kDevPageRefreshRows)
+80003FD0	slot	Dev list vtable ShowDetail (dev_menu.cpp kDevPageShowDetail)
+80003FE0	slot	Dev number window onChosen(count, list) (dev_menu.cpp kCountChosenCallback)
+80003FF0	slot	Dev list row scroll, widget +0x108 (dev_menu.cpp kRowScrollCallback)
+801B6A70	thunk	4bed884c b 8008f2bc EnemyObj::CondNearHomeAi84; prev 801b6a6c b 8008ec84
+801B6A74	thunk	4bed7fb0 b 8008ea24 EnemyObj::CondBodyOverlap; prev 801b6a70 b
+801B6A88	thunk	4bed866c b 8008f0f4 EnemyObj::CondRollAi74; prev 801b6a84 b 8008eaa0
+801B6A8C	thunk	4bed870c b 8008f198 EnemyObj::CondRollWhilePlayerAttacks; prev 801b6a88 b
+801B6A90	thunk	4bed80b0 b 8008eb40 EnemyObj::CondOutOfChaseRange; prev 801b6a8c b
+801B6C84	thunk	4bed80ec b 8008ed70 EnemyObj::CondResumeChase; prev 801b6c80 b 8008ecfc
+801B6C88	thunk	4bed811c b 8008eda4 EnemyObj::CondAtHome; prev 801b6c84 b
+801B6C8C	thunk	4bed80bc b 8008ed48 EnemyObj::CondPlayerInGroupChaseRange; prev 801b6c88 b
+801B6CFC	thunk	4bed8334 b 8008f030 EnemyObj::CondLandDoneNoticeRoll; prev 801b6cf8 b 8008ee2c
+801B6D00	thunk	4bed8270 b 8008ef70 EnemyObj::CondLandDoneNear; prev 801b6cfc b
+801B6D04	thunk	4bed81cc b 8008eed0 EnemyObj::CondLandDone; prev 801b6d00 b
