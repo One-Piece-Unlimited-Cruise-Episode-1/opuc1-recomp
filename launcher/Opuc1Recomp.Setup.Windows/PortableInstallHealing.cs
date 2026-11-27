@@ -36,7 +36,7 @@ internal static class PortableInstallHealing
 
         var previous = state.InstallDir;
         state.InstallDir = installation.Root;
-        JsonState.Write(installation.InstallStatePath, state);
+        JsonState.Write(installation.InstallStatePath, state, StateJsonContext.Default);
 
         // The configured native build directory bakes absolute source, toolchain, and output paths
         // into CMakeCache.txt. After a move it is unusable and would fail the next configure rather

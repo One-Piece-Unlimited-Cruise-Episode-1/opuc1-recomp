@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Opuc1Recomp.Setup.Common</RootNamespace>
@@ -10,6 +10,8 @@
     <Description>Shared logic (disc tool, runtime configuration, icon, SYSCONF, progress) used by the Windows and Linux/macOS setup hosts</Description>
     <DebugType>embedded</DebugType>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Linked into the Native AOT setup hosts: the trim/AOT analyzers run on every build. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Tomlyn" Version="2.10.1" />

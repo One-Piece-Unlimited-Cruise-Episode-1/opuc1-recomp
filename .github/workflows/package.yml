@@ -38,7 +38,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # Cache downloads only. Preparation still validates pins, and every run
       # compiles current aurora, runtime, and generated sources from scratch.
@@ -93,9 +93,9 @@ jobs:
           $env:PATH = "$build;$tools/llvm-mingw/bin;$tools/CMake/bin;$tools/Ninja;$env:PATH"
           cmake -S build/recomp-test/runtime -B $build -DMKW_BUILD_AURORA_TESTS=ON -DFETCHCONTENT_FULLY_DISCONNECTED=OFF
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build $build --parallel 3 --target gx_fifo_tests shader_module_cache_tests mkw_gx_texture_binding_tests mkw_gx_sync_tests mkw_gx_dl_cache_tests
+          cmake --build $build --parallel 3 --target gx_fifo_tests shader_module_cache_tests opuc_gx_texture_binding_tests opuc_gx_sync_tests opuc_gx_dl_cache_tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ctest --test-dir $build --output-on-failure --no-tests=error -R '^(GXFifoTest|RuntimeDirectDrawTest|ShaderModuleCacheTest|mkw_gx_(texture_binding|sync|dl_cache)_tests)'
+          ctest --test-dir $build --output-on-failure --no-tests=error -R '^(GXFifoTest|RuntimeDirectDrawTest|ShaderModuleCacheTest|opuc_gx_(texture_binding|sync|dl_cache)_tests)'
 
       # Print cache results (even if the build fails)
       - name: Show sccache stats
@@ -121,7 +121,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # A dispatched run's Package version becomes the one product version for this job, so the
       # setup host (--version), the installer manifest and the macOS bundle all report it.
@@ -141,12 +141,13 @@ jobs:
           echo "Package version: $version"
 
       # appimagetool ships as an AppImage itself and needs to self-mount via FUSE to run directly;
-      # GitHub's Ubuntu runners don't have libfuse2 preinstalled. The rest is what the precompiled
+      # GitHub's Ubuntu runners don't have libfuse2 preinstalled. clang and zlib1g-dev are what the
+      # Native AOT publish of the setup and translator links with. The rest is what the precompiled
       # aurora/SDL3 package (Prepare-NativePrebuilt.sh) needs to build.
-      - name: Install dependencies (required by appimagetool and SDL3 build)
+      - name: Install dependencies (required by appimagetool, Native AOT and SDL3 build)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfuse2 build-essential git make \
+          sudo apt-get install -y libfuse2 build-essential clang zlib1g-dev git make \
             pkg-config cmake ninja-build gnome-desktop-testing libasound2-dev libpulse-dev \
             libaudio-dev libfribidi-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
             libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
@@ -182,7 +183,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # A dispatched run's Package version becomes the one product version for this job, so the
       # setup host (--version), the installer manifest and the macOS bundle all report it.
@@ -230,7 +231,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
 
       # A dispatched run's Package version becomes the one product version for this job, so the
       # setup host (--version), the installer manifest and the macOS bundle all report it.
@@ -274,28 +275,27 @@ jobs:
           printf '%s  %s\n' "$nodtool_x86_64_sha256" launcher/artifacts/macos/nodtool-x86_64 | shasum -a 256 -c -
           chmod +x launcher/artifacts/macos/nodtool-arm64 launcher/artifacts/macos/nodtool-x86_64
 
-      - name: Publish self-contained Translator tools
+      # Native AOT (each csproj sets PublishAot and the size options). The arm64 runner builds the
+      # x86_64 binaries too: Native AOT cross-compiles between architectures on macOS with Xcode.
+      # Symbols go to a .dSYM beside each binary, which build-setup-pkg.command does not pick up.
+      - name: Publish Native AOT Translator tools
         shell: bash
         run: |
           dotnet publish translator/src/Translator.Cli/Translator.Cli.csproj \
-            -c Release -r osx-arm64 --self-contained true \
-            -p:PublishSingleFile=true \
+            -c Release -r osx-arm64 \
             -o launcher/artifacts/macos/translator-arm64
           dotnet publish translator/src/Translator.Cli/Translator.Cli.csproj \
-            -c Release -r osx-x64 --self-contained true \
-            -p:PublishSingleFile=true \
+            -c Release -r osx-x64 \
             -o launcher/artifacts/macos/translator-x86_64
 
-      - name: Publish self-contained setup CLI
+      - name: Publish Native AOT setup CLI
         shell: bash
         run: |
           dotnet publish launcher/Opuc1Recomp.Setup.Linux/Opuc1Recomp.Setup.Linux.csproj \
-            -c Release -r osx-arm64 --self-contained true \
-            -p:PublishSingleFile=true \
+            -c Release -r osx-arm64 \
             -o launcher/artifacts/macos/setup-arm64
           dotnet publish launcher/Opuc1Recomp.Setup.Linux/Opuc1Recomp.Setup.Linux.csproj \
-            -c Release -r osx-x64 --self-contained true \
-            -p:PublishSingleFile=true \
+            -c Release -r osx-x64 \
             -o launcher/artifacts/macos/setup-x86_64
 
       - name: Download pinned universal Ninja

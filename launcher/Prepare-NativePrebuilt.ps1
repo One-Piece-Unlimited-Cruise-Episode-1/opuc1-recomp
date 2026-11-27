@@ -99,10 +99,10 @@ try {
         throw 'The staging configure exported no runtime_fingerprint; the x86_64 package must carry the runtime archive.'
     }
 
-    # mkw_np_probe links exactly what mkw_runtime_common and the public products
+    # opuc_np_probe links exactly what opuc_runtime_common and the public products
     # link, so building it compiles the whole redistributable closure and nothing
     # else - and a successful link proves the harvested archives are complete.
-    Invoke-Checked $cmake @('--build', $stage, '--target', 'mkw_np_probe', '--target', 'mkw_runtime',
+    Invoke-Checked $cmake @('--build', $stage, '--target', 'opuc_np_probe', '--target', 'opuc_runtime',
         '--parallel', "$Parallel") 'Building the aurora/third-party closure and the runtime' -LogPrefix 'OPUCNP'
 } finally {
     $env:PATH = $oldPath
@@ -159,10 +159,10 @@ function Subtract-Ordered([string[]]$All, [string[]]$Remove) {
     return $result.ToArray()
 }
 
-$probeCompile = Get-NinjaStatementVariables $ninjaLines 'CXX_COMPILER__mkw_np_probe_unscanned_Release'
-$controlCompile = Get-NinjaStatementVariables $ninjaLines 'CXX_COMPILER__mkw_np_probe_control_unscanned_Release'
-$probeLink = Get-NinjaStatementVariables $ninjaLines 'CXX_EXECUTABLE_LINKER__mkw_np_probe_Release'
-$controlLink = Get-NinjaStatementVariables $ninjaLines 'CXX_EXECUTABLE_LINKER__mkw_np_probe_control_Release'
+$probeCompile = Get-NinjaStatementVariables $ninjaLines 'CXX_COMPILER__opuc_np_probe_unscanned_Release'
+$controlCompile = Get-NinjaStatementVariables $ninjaLines 'CXX_COMPILER__opuc_np_probe_control_unscanned_Release'
+$probeLink = Get-NinjaStatementVariables $ninjaLines 'CXX_EXECUTABLE_LINKER__opuc_np_probe_Release'
+$controlLink = Get-NinjaStatementVariables $ninjaLines 'CXX_EXECUTABLE_LINKER__opuc_np_probe_control_Release'
 
 $includeArguments = Subtract-Ordered (Split-NinjaList (Get-NinjaValue $probeCompile 'INCLUDES')) `
     (Split-NinjaList (Get-NinjaValue $controlCompile 'INCLUDES'))
@@ -222,7 +222,7 @@ function Copy-Harvested([string]$SourcePath, [string]$SubDirectory) {
 foreach ($name in ($targets.Keys | Sort-Object)) {
     $target = $targets[$name]
     if (-not (Test-Path -LiteralPath $target.LinkerFile -PathType Leaf)) {
-        # Not part of the closure mkw_np_probe pulled in; deliberately not shipped.
+        # Not part of the closure opuc_np_probe pulled in; deliberately not shipped.
         continue
     }
     $relativeLinker = Copy-Harvested $target.LinkerFile 'lib'
@@ -232,18 +232,18 @@ foreach ($name in ($targets.Keys | Sort-Object)) {
         }
         $relativeRuntime = Copy-Harvested $target.File 'bin'
         $sharedImports.Add([pscustomobject]@{
-            Target = "mkw_np::$name"; Runtime = $relativeRuntime; Implib = $relativeLinker })
-        $linkerFileToReference[$target.LinkerFile] = "mkw_np::$name"
+            Target = "opuc_np::$name"; Runtime = $relativeRuntime; Implib = $relativeLinker })
+        $linkerFileToReference[$target.LinkerFile] = "opuc_np::$name"
     } else {
         $linkerFileToReference[$target.LinkerFile] = "`@PKG`@/$relativeLinker"
     }
 }
 if ($sharedImports.Count -eq 0) { throw 'No shared libraries were harvested; the SDL/zlib/libpng DLLs would be missing.' }
 if ($dawnLinkerFile) { $linkerFileToReference[$dawnLinkerFile] = 'dawn::webgpu_dawn' }
-$runtimeTarget = $targets['mkw_runtime']
+$runtimeTarget = $targets['opuc_runtime']
 if ($null -eq $runtimeTarget -or $runtimeTarget.Type -ne 'STATIC_LIBRARY' -or
     -not $linkerFileToReference.ContainsKey($runtimeTarget.LinkerFile)) {
-    throw 'The runtime archive (mkw_runtime) was not built and harvested.'
+    throw 'The runtime archive (opuc_runtime) was not built and harvested.'
 }
 $runtimeArchiveReference = $linkerFileToReference[$runtimeTarget.LinkerFile]
 

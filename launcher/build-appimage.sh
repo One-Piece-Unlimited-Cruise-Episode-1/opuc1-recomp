@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packages launcher/Opuc1Recomp.Setup.Linux as a self-contained AppImage: a single file anyone can
 # fetch and execute with no git clone, no `dotnet` install, and no system disc tool. The setup and
-# the translator are published as self-contained binaries, and `nodtool` (a prebuilt MIT/Apache-2.0
+# the translator are published as Native AOT binaries, and `nodtool` (a prebuilt MIT/Apache-2.0
 # CLI from encounter/nod, see NodToolProvider.cs) is bundled too - AppRun passes --translator-bin and
 # --disc-tool-bin so local-build.sh/DiscTool.cs skip their from-source/download fallbacks entirely.
 # A pruned native clang/lld/cmake/ninja toolchain (see prepare-portable-tools.sh) is bundled the
@@ -18,7 +18,7 @@
 # generated/, native-build/ and Assets/ live only in that writable cache and are never touched by
 # the sync, so local-build.sh's own incremental caching survives across runs and across AppImage
 # updates. translator/ isn't part of this snapshot at all: it's published as its own
-# self-contained binary (usr/bin/translator-cli) below. Neither native-prebuilt/ nor the toolchain
+# Native AOT binary (usr/bin/translator-cli) below. Neither native-prebuilt/ nor the toolchain
 # are copied into the cache either - both are large and only ever read - but AppRun points
 # $CACHE/toolchain and $CACHE/native-prebuilt symlinks at the current mount on every launch: an
 # AppImage's FUSE mount is at a fresh random /tmp/.mount_XXXXXX every run, and CMake bakes
@@ -99,23 +99,23 @@ appdir="$workspace/launcher/artifacts/appimage-build/AppDir"
 rm -rf "$appdir"
 mkdir -p "$appdir/usr/bin" "$appdir/workspace/launcher" "$appdir/workspace/projects"
 
-echo "Publishing the setup (self-contained $dotnet_rid)..."
+# Native AOT (the csproj sets PublishAot and the size options): one native file, no runtime to
+# bundle. It needs clang and zlib development files here, and runs on this build host's glibc or newer.
+echo "Publishing the setup (Native AOT $dotnet_rid)..."
 publish_tmp="$workspace/launcher/artifacts/appimage-build/publish"
 rm -rf "$publish_tmp"
 dotnet publish "$workspace/launcher/Opuc1Recomp.Setup.Linux" -c Release -r "$dotnet_rid" \
-    --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
     -o "$publish_tmp"
 cp "$publish_tmp/opuc1-recomp-setup" "$appdir/usr/bin/opuc1-recomp-setup"
 chmod +x "$appdir/usr/bin/opuc1-recomp-setup"
 
-# Published as a self-contained binary too, so an AppImage user never needs a `dotnet` SDK on
+# Published as a Native AOT binary too, so an AppImage user never needs a `dotnet` SDK on
 # PATH at all - local-build.sh is told about it via --translator-bin and skips its own
 # dotnet-build-from-source step entirely.
-echo "Publishing the translator (self-contained $dotnet_rid)..."
+echo "Publishing the translator (Native AOT $dotnet_rid)..."
 translator_publish_tmp="$workspace/launcher/artifacts/appimage-build/publish-translator"
 rm -rf "$translator_publish_tmp"
 dotnet publish "$workspace/translator/src/Translator.Cli" -c Release -r "$dotnet_rid" \
-    --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true \
     -o "$translator_publish_tmp"
 cp "$translator_publish_tmp/Translator.Cli" "$appdir/usr/bin/translator-cli"
 chmod +x "$appdir/usr/bin/translator-cli"

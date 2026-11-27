@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Translator.Core.IO;
 
@@ -28,9 +29,11 @@ public static class JsonOutput
 
     private static readonly byte[] TrailingNewLine = Encoding.UTF8.GetBytes(Environment.NewLine);
 
-    public static bool WriteIfChanged<T>(string path, T value, JsonSerializerOptions options)
+    // Takes the source-generated type info rather than options: the translator ships as Native AOT,
+    // where reflection-based serialization is unavailable.
+    public static bool WriteIfChanged<T>(string path, T value, JsonTypeInfo<T> typeInfo)
     {
-        var json = JsonSerializer.SerializeToUtf8Bytes(value, options);
+        var json = JsonSerializer.SerializeToUtf8Bytes(value, typeInfo);
         var content = new byte[json.Length + TrailingNewLine.Length];
         json.CopyTo(content, 0);
         TrailingNewLine.CopyTo(content, json.Length);

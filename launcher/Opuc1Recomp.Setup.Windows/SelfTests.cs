@@ -32,6 +32,7 @@ internal static class SelfTests
         Test("Payload manifest releases", TestPayloadManifestReleases, failures);
         Test("Extracted game release validation", TestExtractedGameRelease, failures);
         Test("Payload timestamp normalization", TestPayloadTimestampNormalization, failures);
+        Test("Installed setup copy from the host bytes", TestPayloadHostExtraction, failures);
         Test("Workspace timestamp reconciliation", TestWorkspaceTimestampReconciliation, failures);
         Test("Toolkit accompanies the workspace", TestToolkitRefreshDecision, failures);
         Test("Host CPU requirement", TestHostCpuRequirement, failures);
@@ -50,6 +51,7 @@ internal static class SelfTests
         Test("Install transaction rollback", TestInstallTransactionRollback, failures);
         Test("Install move transient-lock policy", TestInstallMoveTransientLockPolicy, failures);
         Test("Install scratch recovery", TestInstallScratchRecovery, failures);
+        Test("Shortcut round trip", TestShortcutRoundTrip, failures);
         Test("Shortcut cleanup is best effort", TestShortcutCleanupIsBestEffort, failures);
         Test("Toolkit fingerprint", TestToolkitFingerprint, failures);
         Test("Game inspection state machine", TestGameStateMachine, failures);
@@ -253,6 +255,47 @@ internal static class SelfTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// The installed setup copy is the release file's leading host bytes (the payload carries no second
+    /// copy): exactly the bytes before the payload, not one more or fewer.
+    /// </summary>
+    private static void TestPayloadHostExtraction()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "opuc1-host-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var host = new byte[70_001];
+            new Random(1).NextBytes(host);
+            using var zipBytes = new MemoryStream();
+            using (var zip = new System.IO.Compression.ZipArchive(zipBytes, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+            using (var writer = new StreamWriter(zip.CreateEntry("licenses/x.txt").Open()))
+                writer.Write("x");
+            var setup = Path.Combine(root, "setup.exe");
+            using (var output = File.Create(setup))
+            {
+                output.Write(host);
+                zipBytes.Position = 0;
+                zipBytes.CopyTo(output);
+                output.Write(System.Text.Encoding.ASCII.GetBytes("OPUCPAY1"));
+                output.Write(BitConverter.GetBytes((long)host.Length));
+                output.Write(BitConverter.GetBytes(zipBytes.Length));
+            }
+
+            var extracted = Path.Combine(root, "installed", ProductInfo.SetupCopyName);
+            using (var payload = PayloadArchive.Open(setup))
+                payload.ExtractHost(extracted);
+            if (!File.ReadAllBytes(extracted).AsSpan().SequenceEqual(host))
+                throw new Exception("The installed setup copy is not the release file's host bytes.");
+            if (File.GetLastWriteTimeUtc(extracted).Year != 2000)
+                throw new Exception("The installed setup copy's timestamp was not normalized.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 
@@ -643,6 +686,34 @@ internal static class SelfTests
         }
     }
 
+    /// <summary>
+    /// Shortcuts are written through source-generated COM (Native AOT). A vtable slot declared out of
+    /// order would store the wrong field or crash, so a written .lnk is read back.
+    /// </summary>
+    private static void TestShortcutRoundTrip()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "opuc1-shortcut-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var target = Path.Combine(root, "Install Dir", ProductInfo.SetupCopyName);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.WriteAllText(target, "");
+            var shortcut = Path.Combine(root, "game.lnk");
+
+            ShellIntegration.CreateShortcut(shortcut, target, "--launch", Path.GetDirectoryName(target)!, target, "Play");
+            var (storedTarget, storedArguments) = ShellIntegration.ReadShortcut(shortcut);
+            if (!string.Equals(storedTarget, target, StringComparison.OrdinalIgnoreCase))
+                throw new Exception($"The shortcut targets '{storedTarget}', expected '{target}'.");
+            if (storedArguments != "--launch")
+                throw new Exception($"The shortcut passes '{storedArguments}', expected '--launch'.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static void TestShortcutCleanupIsBestEffort()
     {
         var root = Path.Combine(Path.GetTempPath(), "opuc1-shortcuts-" + Guid.NewGuid().ToString("N"));
@@ -765,7 +836,7 @@ internal static class SelfTests
             File.WriteAllText(Path.Combine(nativeBuild, "CMakeCache.txt"),
                 "CMAKE_HOME_DIRECTORY:INTERNAL=D:/Old/Install/BuildWorkspace/runtime");
             var statePath = Path.Combine(install, "install-state.json");
-            JsonState.Write(statePath, new InstallState { InstallDir = "D:\\Old\\Install" });
+            JsonState.Write(statePath, new InstallState { InstallDir = "D:\\Old\\Install" }, StateJsonContext.Default);
 
             var plain = new Installation(install);
             if (PortableInstallHealing.HealMovedInstall(plain))
@@ -1245,13 +1316,13 @@ internal static class SelfTests
             JsonState.Write(installation.InstallStatePath, new InstallState
             {
                 InstallDir = root, GameId = ProductNames.GameId, DolSha256 = dolSha
-            });
+            }, StateJsonContext.Default);
 
             Directory.CreateDirectory(installation.GameDirectory);
             File.WriteAllBytes(installation.GameExecutable, new byte[128 * 1024]);
             CopyFakeRuntimeAssets(root, installation.GameDirectory);
             JsonState.Write(Path.Combine(installation.GameDirectory, LocalBuildProvenance.FileName),
-                new LocalBuildProvenance { SchemaVersion = 1, Profile = Installation.GameProfile, DolSha256 = dolSha });
+                new LocalBuildProvenance { SchemaVersion = 1, Profile = Installation.GameProfile, DolSha256 = dolSha }, StateJsonContext.Default);
             LocalBuildService.WriteFingerprint(installation.GameDirectory, toolkit, dolSha);
 
             void Expect(ProductStatus expected, string description)

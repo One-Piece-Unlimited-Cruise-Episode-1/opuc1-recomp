@@ -128,7 +128,7 @@ internal sealed class Installation
                               RequiredNonEmptyToolkitDirectories.All(relative =>
                                   IsNonEmptyRegularDirectory(Path.Combine(Root, relative)));
 
-    public InstallState? ReadInstallState() => JsonState.TryRead<InstallState>(InstallStatePath);
+    public InstallState? ReadInstallState() => JsonState.TryRead<InstallState>(InstallStatePath, StateJsonContext.Default);
 
     /// <summary>The six-character game id in an extracted disc's <c>sys/boot.bin</c>.</summary>
     internal static string ReadDiscGameId(string dataRoot)
@@ -139,7 +139,7 @@ internal sealed class Installation
         return System.Text.Encoding.ASCII.GetString(id);
     }
 
-    internal ToolkitState? ReadToolkitState() => JsonState.TryRead<ToolkitState>(ToolkitStatePath);
+    internal ToolkitState? ReadToolkitState() => JsonState.TryRead<ToolkitState>(ToolkitStatePath, StateJsonContext.Default);
 
     /// <summary>
     /// The identity of the installed toolkit. Inspection never writes or adopts state: a missing toolkit provenance
@@ -176,7 +176,7 @@ internal sealed class Installation
             TranslationFingerprint = translationFingerprint,
             NativeToolchainFingerprint = nativeToolchainFingerprint,
             ToolkitReleaseTag = releaseTag
-        });
+        }, StateJsonContext.Default);
 
     /// <summary>
     /// Reads the complete product provenance. A product without the current fingerprint schema is intentionally
@@ -184,7 +184,7 @@ internal sealed class Installation
     /// </summary>
     public ProductFingerprint? ReadProductFingerprint()
     {
-        var recorded = JsonState.TryRead<ProductFingerprint>(Path.Combine(GameDirectory, ProductFingerprint.FileName));
+        var recorded = JsonState.TryRead<ProductFingerprint>(Path.Combine(GameDirectory, ProductFingerprint.FileName), StateJsonContext.Default);
         return recorded is { SchemaVersion: 1 } ? recorded : null;
     }
 
@@ -285,7 +285,7 @@ internal sealed class Installation
             return "The installed game inputs cannot be verified: " + ex.Message;
         }
 
-        var local = JsonState.TryRead<LocalBuildProvenance>(Path.Combine(GameDirectory, LocalBuildProvenance.FileName));
+        var local = JsonState.TryRead<LocalBuildProvenance>(Path.Combine(GameDirectory, LocalBuildProvenance.FileName), StateJsonContext.Default);
         if (local is not { SchemaVersion: 1 } ||
             !local.Profile.Equals(GameProfile, StringComparison.Ordinal) ||
             !local.DolSha256.Equals(fingerprint.DolSha256, StringComparison.OrdinalIgnoreCase))

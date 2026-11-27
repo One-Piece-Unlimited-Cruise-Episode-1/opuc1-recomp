@@ -38,7 +38,7 @@ translation by default.
 
 | Tool | Notes |
 | --- | --- |
-| .NET 10 SDK | Builds and runs the translator. |
+| .NET 11 SDK | Builds and runs the translator. |
 | CMake ≥ 3.25 and Ninja | Configures and drives the native build. |
 | Clang / LLVM | The shipped build uses LLVM-MinGW targeting `x86-64-v3`. MSVC is not the tested path. |
 
@@ -46,7 +46,7 @@ Build the CLI once and invoke the assembly directly:
 
 ```powershell
 dotnet build translator/src/Translator.Cli/Translator.Cli.csproj -c Release
-$translator = 'translator/src/Translator.Cli/bin/Release/net10.0/Translator.Cli.dll'
+$translator = 'translator/src/Translator.Cli/bin/Release/net11.0/Translator.Cli.dll'
 ```
 
 ## Manifest essentials

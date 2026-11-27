@@ -8,7 +8,7 @@ if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING
         "Minimum macOS version supported by One Piece: Unlimited Recompilation Episode 1" FORCE)
 endif()
-project(mkw_recompiled)
+project(opuc1_recomp)
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "^(Clang|AppleClang)$" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "One Piece: Unlimited Recompilation Episode 1 requires a 64-bit Clang toolchain")
@@ -79,7 +79,7 @@ endif()
 # Preprocessor definitions that belong to this project's own code (the runtime,
 # the translated shards and the product glue) and to nothing else. They are
 # applied directory-scoped, immediately after the aurora add_subdirectory() call,
-# so every target created afterwards (mkw_runtime_common, the translated shard
+# so every target created afterwards (opuc_runtime_common, the translated shard
 # libraries and the products in cmake/PublicProducts.cmake) inherits them while
 # aurora-main and its third-party tree stay unaffected.
 set(MKW_PROJECT_COMPILE_DEFINITIONS NOMINMAX)
@@ -101,19 +101,19 @@ option(MKW_USE_PREBUILT_RUNTIME
 # Riivolution XML is parsed with pugixml, matching the parser used by Dolphin.
 # The four upstream files from v1.15 (ee86beb30e4973f5feffe3ce63bfa4fbadf72f38)
 # are vendored so builds remain usable with FETCHCONTENT_FULLY_DISCONNECTED.
-add_library(mkw_pugixml STATIC third_party/pugixml/pugixml.cpp)
-add_library(mkw::pugixml ALIAS mkw_pugixml)
-target_include_directories(mkw_pugixml PUBLIC third_party/pugixml)
-target_compile_features(mkw_pugixml PUBLIC cxx_std_17)
-set_target_properties(mkw_pugixml PROPERTIES UNITY_BUILD OFF)
+add_library(opuc_pugixml STATIC third_party/pugixml/pugixml.cpp)
+add_library(opuc::pugixml ALIAS opuc_pugixml)
+target_include_directories(opuc_pugixml PUBLIC third_party/pugixml)
+target_compile_features(opuc_pugixml PUBLIC cxx_std_17)
+set_target_properties(opuc_pugixml PROPERTIES UNITY_BUILD OFF)
 
 # Runtime configuration is real TOML, parsed by toml11 rather than a project-
 # specific line parser. Keep it header-only and vendored so disconnected release
 # builds have exactly the same parser as developer builds.
-add_library(mkw_toml11 INTERFACE)
-add_library(mkw::toml11 ALIAS mkw_toml11)
-target_include_directories(mkw_toml11 SYSTEM INTERFACE third_party/toml11)
-target_compile_features(mkw_toml11 INTERFACE cxx_std_17)
+add_library(opuc_toml11 INTERFACE)
+add_library(opuc::toml11 ALIAS opuc_toml11)
+target_include_directories(opuc_toml11 SYSTEM INTERFACE third_party/toml11)
+target_compile_features(opuc_toml11 INTERFACE cxx_std_17)
 
 set(MKW_TRANSLATED_COMPILE_JOBS 0 CACHE STRING
     "Cap on concurrently compiling translated shard TUs via a Ninja job pool (0 = uncapped). \
@@ -304,8 +304,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/RuntimeLibrary.cmake")
 # defined here, after the project definitions, so its flags match the products'.
 if(MKW_NATIVE_PREBUILT_EXPORT_DIR AND NOT MKW_NATIVE_PREBUILT_DIR)
     if(MKW_HOST_IS_X86_64)
-        mkw_add_runtime_library(mkw_runtime STATIC ${SOURCES})
-        set_target_properties(mkw_runtime PROPERTIES EXCLUDE_FROM_ALL ON)
+        mkw_add_runtime_library(opuc_runtime STATIC ${SOURCES})
+        set_target_properties(opuc_runtime PROPERTIES EXCLUDE_FROM_ALL ON)
     endif()
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/NativePrebuiltExport.cmake")
 endif()
@@ -336,25 +336,24 @@ else()
         # Compile-only audit of native runtime sources. It deliberately avoids
         # translated products until their host dependencies are portable.
         # runtime/src is game-independent; per-game glue lives in runtime/game.
-        add_library(mkw_macos_native_compile OBJECT ${SOURCES})
-        target_include_directories(mkw_macos_native_compile PRIVATE
+        add_library(opuc_macos_native_compile OBJECT ${SOURCES})
+        target_include_directories(opuc_macos_native_compile PRIVATE
             "${CMAKE_CURRENT_LIST_DIR}/include" "${CMAKE_CURRENT_LIST_DIR}/src"
             "${CMAKE_CURRENT_LIST_DIR}/.." "${MKW_AURORA_DIR}/include")
-        target_compile_features(mkw_macos_native_compile PRIVATE cxx_std_20)
-        target_compile_definitions(mkw_macos_native_compile PRIVATE SDL_MAIN_HANDLED TARGET_PC)
-        target_link_libraries(mkw_macos_native_compile PRIVATE
+        target_compile_features(opuc_macos_native_compile PRIVATE cxx_std_20)
+        target_compile_definitions(opuc_macos_native_compile PRIVATE SDL_MAIN_HANDLED TARGET_PC)
+        target_link_libraries(opuc_macos_native_compile PRIVATE
             aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx
-            mkw::pugixml mkw::toml11)
+            opuc::pugixml opuc::toml11)
         if(MKW_PLATFORM_MACOS_X86_64)
-            target_link_libraries(mkw_macos_native_compile PRIVATE mkw::libco)
-            target_compile_options(mkw_macos_native_compile PRIVATE
+            target_link_libraries(opuc_macos_native_compile PRIVATE opuc::libco)
+            target_compile_options(opuc_macos_native_compile PRIVATE
                 -march=x86-64-${MKW_X86_CPU_PROFILE})
             if(MKW_X86_CPU_PROFILE STREQUAL "v2")
-                target_compile_definitions(mkw_macos_native_compile PRIVATE MKW_X86_CPU_PROFILE_V2=1)
+                target_compile_definitions(opuc_macos_native_compile PRIVATE MKW_X86_CPU_PROFILE_V2=1)
             endif()
         endif()
-        set_target_properties(mkw_macos_native_compile PROPERTIES UNITY_BUILD OFF)
+        set_target_properties(opuc_macos_native_compile PROPERTIES UNITY_BUILD OFF)
     endif()
-    add_custom_target(mkw_platform_paths_check DEPENDS mkw_platform)
     message(STATUS "Translated product targets disabled (MKW_BUILD_PRODUCTS=OFF)")
 endif()

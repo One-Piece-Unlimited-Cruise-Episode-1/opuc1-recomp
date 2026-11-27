@@ -94,7 +94,7 @@ Build the Windows setup with `powershell -ExecutionPolicy Bypass -File launcher/
 
 Owning the game is still required even if you compile everything yourself.
 
-You'll need: .NET 10 SDK, Node.js 20+, CMake 3.25+, Ninja and LLVM-MinGW clang
+You'll need: .NET 11 SDK, Node.js 20+, CMake 3.25+, Ninja and LLVM-MinGW clang
 (`winget install MartinStorsjo.LLVM-MinGW.UCRT`, or point `OPUC_LLVM_MINGW` at its `bin` folder).
 
 1. Extract your disc into `data/extract/DATA` at the repository root (for example with

@@ -63,7 +63,8 @@ silently stale game.
 
 ## Building the installers
 
-Windows (needs the .NET 10 SDK, and Visual Studio or `-VcRuntimeDirectory` for the VC++ runtime DLLs):
+Windows (needs the .NET 11 SDK and Visual Studio with the "Desktop development with C++" workload, which Native AOT
+links with and which also provides the VC++ runtime DLLs unless `-VcRuntimeDirectory` is given):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File launcher/Build-Installer.ps1
@@ -72,7 +73,9 @@ powershell -ExecutionPolicy Bypass -File launcher/Build-Installer.ps1
 The first run downloads the pinned portable toolchain (`Prepare-PortableTools.ps1`) and dependency sources
 (`Prepare-Dependencies.ps1`) into `launcher/artifacts/`, builds the precompiled aurora/third-party/runtime package
 (`Prepare-NativePrebuilt.ps1`), publishes the setup host and the translator, stages the payload, runs the boundary
-and dependency audits and writes `launcher/dist/opuc1-recomp-setup.exe`. Linux: `bash launcher/build-appimage.sh`.
+and dependency audits and writes `launcher/dist/opuc1-recomp-setup.exe`. The setup host and the translator are Native AOT
+executables; the payload leaves out the parts of the toolchain the build never uses (`PayloadPruning.ps1`) and carries
+no second copy of the host. Linux: `bash launcher/build-appimage.sh` (also needs `clang` and `zlib1g-dev` for Native AOT).
 macOS: `launcher/macos/build-setup-pkg.command` (see the script header for the inputs).
 
 `opuc1-recomp-setup.exe --self-test` runs the host's self-tests (no game data needed).
@@ -89,7 +92,7 @@ list, build step ids).
 | `Opuc1Recomp.Setup.Common.Cli/` | packaging-time helper that fetches the pinned nodtool |
 | `LocalBuild.ps1`, `NativeBuildFlags.ps1` | the translate-and-compile run inside an installation (Windows) |
 | `local-build.sh`, `local-build-macos.command` | the same for Linux and macOS |
-| `Build-Installer.ps1`, `build-appimage.sh`, `macos/` | release packaging |
+| `Build-Installer.ps1`, `PayloadPruning.ps1`, `build-appimage.sh`, `macos/` | release packaging (`PayloadPruning.ps1`: what the Windows payload leaves out) |
 | `Prepare-*.ps1`, `Prepare-NativePrebuilt.sh`, `prepare-portable-tools.sh` | pinned toolchain, dependencies, precompiled package |
 | `Test-*.ps1`, `Test-*.sh` | release audits |
 

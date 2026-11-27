@@ -82,8 +82,8 @@ endif()
 # One interface target carries the whole compile/link surface. The public aurora
 # names then reduce to aliases of it, which keeps the link line free of the
 # fivefold duplication that giving each of them the full list would produce.
-add_library(mkw_native_prebuilt INTERFACE IMPORTED GLOBAL)
-set_target_properties(mkw_native_prebuilt PROPERTIES
+add_library(opuc_native_prebuilt INTERFACE IMPORTED GLOBAL)
+set_target_properties(opuc_native_prebuilt PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${_mkw_np_includes}"
     INTERFACE_COMPILE_DEFINITIONS "${MKW_NP_COMPILE_DEFINITIONS}"
     INTERFACE_COMPILE_OPTIONS "${MKW_NP_COMPILE_OPTIONS}"
@@ -91,7 +91,7 @@ set_target_properties(mkw_native_prebuilt PROPERTIES
 
 foreach(_target IN LISTS MKW_NP_AURORA_TARGETS)
     add_library(${_target} INTERFACE IMPORTED GLOBAL)
-    set_target_properties(${_target} PROPERTIES INTERFACE_LINK_LIBRARIES mkw_native_prebuilt)
+    set_target_properties(${_target} PROPERTIES INTERFACE_LINK_LIBRARIES opuc_native_prebuilt)
 endforeach()
 
 list(LENGTH _mkw_np_links _mkw_np_link_count)

@@ -25,7 +25,7 @@ endif()
 # walk follows real SUBDIRECTORIES properties instead of parsing files, so it
 # cannot disagree with the configure that just ran. The names are candidates
 # only - each is re-checked below (TARGET existence, library type) and against
-# the link closure mkw_np_probe actually pulled in before anything ships.
+# the link closure opuc_np_probe actually pulled in before anything ships.
 function(mkw_collect_buildsystem_targets _root_dir _out_var)
     set(_candidates "")
     set(_visited "")
@@ -56,31 +56,31 @@ set(_mkw_np_probe_dir "${CMAKE_BINARY_DIR}/native_prebuilt_probe")
 file(MAKE_DIRECTORY "${_mkw_np_probe_dir}")
 file(WRITE "${_mkw_np_probe_dir}/probe.cpp"
     "// Records the compile and link interface aurora's public targets hand to a\n"
-    "// consumer. Building mkw_np_probe compiles exactly the aurora + third-party\n"
+    "// consumer. Building opuc_np_probe compiles exactly the aurora + third-party\n"
     "// closure the game products need, and proves the resulting archives link.\n"
     "int main() { return 0; }\n")
 
 # Control: identical target with no aurora dependency. Subtracting its command
 # line from the probe's isolates exactly the aurora-derived contribution.
-add_executable(mkw_np_probe_control EXCLUDE_FROM_ALL "${_mkw_np_probe_dir}/probe.cpp")
-set_target_properties(mkw_np_probe_control PROPERTIES UNITY_BUILD OFF)
-target_compile_features(mkw_np_probe_control PRIVATE cxx_std_20)
+add_executable(opuc_np_probe_control EXCLUDE_FROM_ALL "${_mkw_np_probe_dir}/probe.cpp")
+set_target_properties(opuc_np_probe_control PROPERTIES UNITY_BUILD OFF)
+target_compile_features(opuc_np_probe_control PRIVATE cxx_std_20)
 
-add_executable(mkw_np_probe EXCLUDE_FROM_ALL "${_mkw_np_probe_dir}/probe.cpp")
-set_target_properties(mkw_np_probe PROPERTIES UNITY_BUILD OFF)
-target_compile_features(mkw_np_probe PRIVATE cxx_std_20)
-# Exactly what mkw_runtime_common and the products link (PublicProducts.cmake)
+add_executable(opuc_np_probe EXCLUDE_FROM_ALL "${_mkw_np_probe_dir}/probe.cpp")
+set_target_properties(opuc_np_probe PROPERTIES UNITY_BUILD OFF)
+target_compile_features(opuc_np_probe PRIVATE cxx_std_20)
+# Exactly what opuc_runtime_common and the products link (PublicProducts.cmake)
 # with one deliberate exception: pugixml stays a locally compiled single
 # translation unit, so it must not enter this closure.
-target_link_libraries(mkw_np_probe PRIVATE
+target_link_libraries(opuc_np_probe PRIVATE
     aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx)
 
 get_filename_component(_mkw_np_aurora_dir "${MKW_AURORA_DIR}" ABSOLUTE)
 mkw_collect_buildsystem_targets("${_mkw_np_aurora_dir}" _mkw_np_all_targets)
 # The game-independent runtime archive (RuntimeLibrary.cmake). It is outside the
 # probe closure, so it ships only when the harvester builds it explicitly.
-if(TARGET mkw_runtime)
-    list(APPEND _mkw_np_all_targets "mkw_runtime")
+if(TARGET opuc_runtime)
+    list(APPEND _mkw_np_all_targets "opuc_runtime")
 endif()
 if(NOT _mkw_np_all_targets)
     message(FATAL_ERROR "No buildsystem targets were found under ${_mkw_np_aurora_dir}")
@@ -143,7 +143,7 @@ file(WRITE "${MKW_NATIVE_PREBUILT_EXPORT_DIR}/meta.txt"
     "cxx_compiler=${CMAKE_CXX_COMPILER}\n"
     "cxx_compiler_version=${CMAKE_CXX_COMPILER_VERSION}\n"
     "library_targets=${_mkw_np_lib_targets_csv}\n")
-if(TARGET mkw_runtime)
+if(TARGET opuc_runtime)
     mkw_runtime_fingerprint(_mkw_np_runtime_fingerprint "${CMAKE_CURRENT_SOURCE_DIR}"
         "${MKW_CPPWINRT_INCLUDE_DIR}" "${MKW_X86_CPU_PROFILE}")
     file(APPEND "${MKW_NATIVE_PREBUILT_EXPORT_DIR}/meta.txt"

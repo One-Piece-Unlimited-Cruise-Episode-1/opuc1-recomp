@@ -107,7 +107,7 @@ output:
 
 $translatorProject = Join-Path $repoRoot 'translator/src/Translator.Cli/Translator.Cli.csproj'
 Invoke-Checked $dotnet @('build', $translatorProject, '-c', 'Release', '--disable-build-servers') 'Building the translator'
-$translator = Join-Path $repoRoot 'translator/src/Translator.Cli/bin/Release/net10.0/Translator.Cli.dll'
+$translator = Join-Path $repoRoot 'translator/src/Translator.Cli/bin/Release/net11.0/Translator.Cli.dll'
 $metadata = Join-Path $stage 'generated/base_translation_output.json'
 Invoke-Checked $dotnet @($translator, 'translate-recursive', '0x80001000', '--project', $manifest,
     '--output-metadata', $metadata, '--threads', "$Parallel") `

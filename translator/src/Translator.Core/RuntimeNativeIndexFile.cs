@@ -11,7 +11,7 @@ namespace Translator.Core;
 /// On-disk form of <see cref="RuntimeNativeIndex"/>. It is only trusted while its
 /// source digest matches the native sources it was extracted from.
 /// </summary>
-public static class RuntimeNativeIndexFile
+public static partial class RuntimeNativeIndexFile
 {
     public const string Format = "opuc1-runtime-native-index";
     public const int FormatVersion = 3;
@@ -19,12 +19,8 @@ public static class RuntimeNativeIndexFile
     public const int ExtractorVersion = 2;
     public const string DefaultFileName = "native-index.json";
 
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-        WriteIndented = true
-    };
+    // Source-generated (the translator ships as Native AOT): camelCase, indented, unknown members rejected.
+    private static readonly IndexJsonContext Json = IndexJsonContext.Default;
 
     /// <summary>
     /// Lowercase hex SHA-256 over one <c>"&lt;file sha256&gt;  &lt;relative path&gt;\n"</c> line per
@@ -89,7 +85,7 @@ public static class RuntimeNativeIndexFile
         };
 
         // Indented output uses the platform newline on net8; pin it so the bytes are identical everywhere.
-        var json = JsonSerializer.Serialize(document, Options).Replace("\r\n", "\n", StringComparison.Ordinal);
+        var json = JsonSerializer.Serialize(document, Json.IndexDocument).Replace("\r\n", "\n", StringComparison.Ordinal);
         return Encoding.UTF8.GetBytes(json + "\n");
     }
 
@@ -131,7 +127,7 @@ public static class RuntimeNativeIndexFile
                 reason = "extractor version differs";
                 return false;
             }
-            document = root.Deserialize<IndexDocument>(Options);
+            document = root.Deserialize(Json.IndexDocument);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException)
         {
@@ -225,6 +221,13 @@ public static class RuntimeNativeIndexFile
             dto.ReadsCtrBeforeWrite, dto.MayWriteCtr,
             dto.ReadsLrBeforeWrite, dto.MayWriteLr,
             (GuestCallBoundaryFlags)dto.BoundaryFlags, Array.Empty<uint>());
+
+    [JsonSourceGenerationOptions(
+        PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        WriteIndented = true)]
+    [JsonSerializable(typeof(IndexDocument))]
+    private sealed partial class IndexJsonContext : JsonSerializerContext;
 
     private sealed class IndexDocument
     {

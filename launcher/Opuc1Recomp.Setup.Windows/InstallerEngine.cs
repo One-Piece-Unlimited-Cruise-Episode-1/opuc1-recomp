@@ -88,7 +88,7 @@ internal sealed class InstallerEngine
             WorkspaceTimestamps.MarkChangedFiles(existing.WorkspaceDirectory, workspace,
                 _reporter.Diagnostic, cancellationToken);
         }
-        payload.ExtractEntry("host/" + ProductInfo.SetupCopyName, Path.Combine(staging, ProductInfo.SetupCopyName));
+        payload.ExtractHost(Path.Combine(staging, ProductInfo.SetupCopyName));
         payload.ExtractDirectory("licenses", Path.Combine(staging, "licenses"));
         payload.ExtractEntry(InstalledLayout.PayloadManifestFileName,
             Path.Combine(staging, InstalledLayout.PayloadManifestFileName));
@@ -307,8 +307,8 @@ internal sealed class InstallerEngine
             TranslationFingerprint = manifest.TranslationFingerprint,
             NativeToolchainFingerprint = manifest.NativeToolchainFingerprint,
             ToolkitReleaseTag = manifest.ToolkitReleaseTag
-        });
-        JsonState.Write(Path.Combine(staging, InstalledLayout.InstallStateFileName), state);
+        }, StateJsonContext.Default);
+        JsonState.Write(Path.Combine(staging, InstalledLayout.InstallStateFileName), state, StateJsonContext.Default);
     }
 
     private static InstallState BuildInstallState(InstallState? previousState, string installDirectory,

@@ -12,19 +12,24 @@ internal sealed class PayloadArchive : IDisposable
         new(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
     private const int FooterSize = 24;
     private readonly FileStream _executable;
+    private readonly long _hostLength;
     private readonly SliceStream _payloadStream;
     private readonly ZipArchive _zip;
 
-    private PayloadArchive(FileStream executable, SliceStream payloadStream, ZipArchive zip)
+    private PayloadArchive(FileStream executable, long hostLength, SliceStream payloadStream, ZipArchive zip)
     {
         _executable = executable;
+        _hostLength = hostLength;
         _payloadStream = payloadStream;
         _zip = zip;
     }
 
-    public static PayloadArchive OpenCurrent()
+    public static PayloadArchive OpenCurrent() =>
+        Open(Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the setup executable."));
+
+    /// <summary>Opens the payload appended to the setup executable at <paramref name="path"/>.</summary>
+    internal static PayloadArchive Open(string path)
     {
-        var path = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the setup executable.");
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
@@ -41,7 +46,7 @@ internal sealed class PayloadArchive : IDisposable
 
             var slice = new SliceStream(stream, offset, length);
             var zip = new ZipArchive(slice, ZipArchiveMode.Read, leaveOpen: true);
-            return new PayloadArchive(stream, slice, zip);
+            return new PayloadArchive(stream, offset, slice, zip);
         }
         catch
         {
@@ -60,8 +65,7 @@ internal sealed class PayloadArchive : IDisposable
 
     internal static PayloadManifest ParseManifest(Stream stream)
     {
-        var manifest = JsonSerializer.Deserialize<PayloadManifest>(stream,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+        var manifest = JsonSerializer.Deserialize(stream, StateJsonContext.Default.PayloadManifest)
             ?? throw new InvalidDataException("The payload manifest is invalid.");
         ValidateManifest(manifest);
         return manifest;
@@ -101,6 +105,22 @@ internal sealed class PayloadArchive : IDisposable
         ExtractEntry(InstalledLayout.ToolkitEntryPrefix + "nodtool.exe", tool);
         ExtractDirectory(InstalledLayout.ToolkitEntryPrefix + "Redist", directory);
         return tool;
+    }
+
+    /// <summary>
+    /// Writes the bare setup host: this executable up to the payload. The release file is exactly that
+    /// host with the payload and footer appended (Build-Installer.ps1), so the installed copy is the same
+    /// program without carrying a second copy of it inside the payload.
+    /// </summary>
+    public void ExtractHost(string destination)
+    {
+        if (_hostLength <= 0)
+            throw new InvalidDataException("The installation payload does not follow a setup host.");
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using (var host = new SliceStream(_executable, 0, _hostLength))
+        using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
+            host.CopyTo(output);
+        NormalizeExtractedTimestamp(destination);
     }
 
     public void ExtractEntry(string entryName, string destination)

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Translator.Core.IO;
 using Translator.Core.Translation;
 using Translator.Core.Loading;
@@ -160,11 +161,12 @@ public static class BaseTranslationOutputMetadataFile
 {
     // Machine-read only: indentation tripled the payload of a file that already
     // measures tens of megabytes and is never opened by a human.
-    private static readonly JsonSerializerOptions JsonOptions = JsonOutput.CompactCamelCase;
+    // Source-generated (Native AOT) with the same settings as JsonOutput.CompactCamelCase.
+    private static readonly BaseTranslationOutputMetadataJsonContext Json = BaseTranslationOutputMetadataJsonContext.Default;
 
     public static BaseTranslationOutputMetadata Read(string path)
     {
-        var metadata = JsonSerializer.Deserialize<BaseTranslationOutputMetadata>(File.ReadAllText(path), JsonOptions)
+        var metadata = JsonSerializer.Deserialize(File.ReadAllText(path), Json.BaseTranslationOutputMetadata)
             ?? throw new InvalidDataException($"Base translation output metadata is empty: {path}");
         Validate(metadata, path);
         return metadata;
@@ -176,7 +178,7 @@ public static class BaseTranslationOutputMetadataFile
         // Serialise straight into a byte buffer. The previous shape built a
         // multi-megabyte UTF-16 string and then read the whole live file back as a
         // second one purely to answer "did anything change?".
-        return JsonOutput.WriteIfChanged(path, metadata, JsonOptions);
+        return JsonOutput.WriteIfChanged(path, metadata, Json.BaseTranslationOutputMetadata);
     }
 
     private static void Validate(BaseTranslationOutputMetadata metadata, string source)
@@ -229,3 +231,7 @@ public static class BaseTranslationOutputMetadataFile
         return true;
     }
 }
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = false)]
+[JsonSerializable(typeof(BaseTranslationOutputMetadata))]
+internal sealed partial class BaseTranslationOutputMetadataJsonContext : JsonSerializerContext;

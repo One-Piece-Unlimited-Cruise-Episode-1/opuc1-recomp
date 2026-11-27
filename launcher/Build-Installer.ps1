@@ -11,6 +11,9 @@ param(
 # (bundled translator, LLVM-MinGW, CMake, Ninja, nodtool, the runtime and aurora sources, the pinned
 # dependency sources and the precompiled aurora/runtime package) appended behind an OPUCPAY1 trailer.
 # The user's own disc is translated and compiled on their machine; nothing game-derived ships.
+# The host and the translator are Native AOT executables (their csproj files set PublishAot). The
+# payload carries no second copy of the host: an installation writes the release file's leading
+# host bytes (PayloadArchive.ExtractHost).
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 3.0
@@ -18,6 +21,8 @@ Set-StrictMode -Version 3.0
 # The canonical configure flags, and the Assert-File/Assert-Directory/Get-OpucFileSha256
 # helpers shared with LocalBuild.ps1 and Prepare-NativePrebuilt.ps1.
 . (Join-Path $PSScriptRoot 'NativeBuildFlags.ps1')
+# Remove-OpucUnusedToolkitFiles / Remove-OpucUnusedDependencyFiles: what the staged payload leaves out.
+. (Join-Path $PSScriptRoot 'PayloadPruning.ps1')
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $outputRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
@@ -198,14 +203,12 @@ Reset-Directory $workRoot
 Reset-OutputDirectory $outputRoot
 foreach ($path in @($publish,$payloadRoot)) { [IO.Directory]::CreateDirectory($path) | Out-Null }
 
-Write-Host '[1/6] Publishing self-contained CLI host and translator...'
-& dotnet publish $setupProject -c Release -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-    -p:DebugType=None -o (Join-Path $publish 'setup')
+Write-Host '[1/6] Publishing the Native AOT setup host and translator...'
+# PublishAot and the size options come from each csproj; Native AOT output is self-contained and one
+# native file by itself. DebugType=None keeps the .pdb out of the publish directory.
+& dotnet publish $setupProject -c Release -r win-x64 -p:DebugType=None -o (Join-Path $publish 'setup')
 if ($LASTEXITCODE -ne 0) { throw "Setup publish failed with exit code $LASTEXITCODE." }
-& dotnet publish $translatorProject -c Release -r win-x64 --self-contained true `
-    -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-    -p:DebugType=None -o (Join-Path $publish 'translator')
+& dotnet publish $translatorProject -c Release -r win-x64 -p:DebugType=None -o (Join-Path $publish 'translator')
 if ($LASTEXITCODE -ne 0) { throw "Translator publish failed with exit code $LASTEXITCODE." }
 $setupHost = Join-Path $publish "setup\$setupName"
 $translator = Join-Path $publish 'translator\Translator.Cli.exe'
@@ -229,17 +232,7 @@ $workspace = Join-Path $payloadRoot 'BuildWorkspace'
 Copy-Directory (Join-Path $portableTools 'llvm-mingw') (Join-Path $toolkit 'llvm-mingw')
 Copy-Directory (Join-Path $portableTools 'CMake') (Join-Path $toolkit 'CMake')
 Copy-Directory (Join-Path $portableTools 'Ninja') (Join-Path $toolkit 'Ninja')
-# Debuggers, Python bindings, and the CMake GUI are not part of the local build graph.
-# Leaving them out reduces the attack/dependency surface without removing compiler support files.
-foreach ($unused in @(
-    (Join-Path $toolkit 'llvm-mingw\python'),
-    (Join-Path $toolkit 'CMake\bin\cmake-gui.exe')
-)) {
-    if (Test-Path -LiteralPath $unused) { Remove-Item -LiteralPath $unused -Recurse -Force }
-}
-Get-ChildItem -LiteralPath (Join-Path $toolkit 'llvm-mingw\bin') -File |
-    Where-Object { $_.Name -like 'lldb*' -or $_.Name -like 'liblldb*' } |
-    Remove-Item -Force
+Remove-OpucUnusedToolkitFiles $toolkit
 [IO.Directory]::CreateDirectory((Join-Path $toolkit 'Translator')) | Out-Null
 Copy-Item -LiteralPath $translator -Destination (Join-Path $toolkit 'Translator\Translator.Cli.exe')
 Copy-Item -LiteralPath $nodTool -Destination (Join-Path $toolkit 'nodtool.exe')
@@ -274,6 +267,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LocalBuild.ps1') -Destination (
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'NativeBuildFlags.ps1') -Destination (Join-Path $workspace 'NativeBuildFlags.ps1')
 [IO.Directory]::CreateDirectory((Join-Path $workspace 'Dependencies')) | Out-Null
 foreach ($name in $requiredDependencies) { Copy-Directory (Join-Path $dependencySources $name) (Join-Path $workspace "Dependencies\$name") }
+Remove-OpucUnusedDependencyFiles (Join-Path $workspace 'Dependencies')
 
 # The translation identity covers the runtime's native registrations through this index (see
 # ToolkitFingerprint), so it is extracted from exactly the staged runtime sources.
@@ -308,9 +302,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Windows PowerShell rejects the staged precompiled aurora package (exit $LASTEXITCODE); every installation would build aurora from source."
 }
 Remove-Item -LiteralPath $prebuiltGate -Force
-
-[IO.Directory]::CreateDirectory((Join-Path $payloadRoot 'host')) | Out-Null
-Copy-Item $setupHost (Join-Path $payloadRoot "host\$setupName")
 
 Write-Host '[3/6] Writing manifests and third-party license inventory...'
 [IO.Directory]::CreateDirectory((Join-Path $payloadRoot 'licenses')) | Out-Null
@@ -395,7 +386,7 @@ Write-Host '[4/6] Enforcing the copyright and generated-code boundary...'
 Write-Host '[5/6] Creating the canonical installer payload...'
 $payloadZip = Join-Path $workRoot 'payload.zip'
 Compress-Zip $payloadRoot $payloadZip @(
-    'Toolkit','BuildWorkspace','host','licenses','payload-manifest.json')
+    'Toolkit','BuildWorkspace','licenses','payload-manifest.json')
 
 Write-Host '[6/6] Producing the single-file setup executable...'
 $outputSetup = Join-Path $outputRoot $setupName

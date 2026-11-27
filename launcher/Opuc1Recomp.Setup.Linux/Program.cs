@@ -140,7 +140,7 @@ internal static class Program
         if (!File.Exists(exePath))
             throw new InvalidDataException($"The build finished without producing {exePath}.");
 
-        var state = JsonState.TryRead<InstallState>(StatePath) ?? new InstallState();
+        var state = JsonState.TryRead<InstallState>(StatePath, StateJsonContext.Default) ?? new InstallState();
         state.Workspace = workspace;
         state.Game = new ProductInstallRecord
         {
@@ -152,7 +152,7 @@ internal static class Program
         };
         var installedIcon = Path.Combine(installDir, ProductIcon.BaseName + ".png");
         DesktopEntry.Create(exePath, File.Exists(installedIcon) ? installedIcon : null);
-        JsonState.Write(StatePath, state);
+        JsonState.Write(StatePath, state, StateJsonContext.Default);
 
         // The runtime reads the game files from dvd_root at every launch, not just at translation time.
         RuntimeConfiguration.SetDvdRoot(RuntimeConfiguration.ResolveConfigPath(installDir), dataDir);
@@ -162,7 +162,7 @@ internal static class Program
 
     private static void Uninstall()
     {
-        var state = JsonState.TryRead<InstallState>(StatePath);
+        var state = JsonState.TryRead<InstallState>(StatePath, StateJsonContext.Default);
         if (state?.Game is { } record)
         {
             if (Directory.Exists(record.InstallDirectory))
@@ -175,7 +175,7 @@ internal static class Program
                     Path.Combine(state.Workspace, "Assets", "DATA"));
             }
             state.Game = null;
-            JsonState.Write(StatePath, state);
+            JsonState.Write(StatePath, state, StateJsonContext.Default);
         }
         else
         {
@@ -188,7 +188,7 @@ internal static class Program
 
     private static int Launch()
     {
-        var record = JsonState.TryRead<InstallState>(StatePath)?.Game;
+        var record = JsonState.TryRead<InstallState>(StatePath, StateJsonContext.Default)?.Game;
         if (record is null)
         {
             Console.Error.WriteLine("The game is not installed. Run 'install --game <disc image>' first.");
@@ -214,7 +214,7 @@ internal static class Program
 
     private static (ProductStatus Status, string Detail) InspectProduct()
     {
-        var state = JsonState.TryRead<InstallState>(StatePath);
+        var state = JsonState.TryRead<InstallState>(StatePath, StateJsonContext.Default);
         if (state?.Game is not { } record) return (ProductStatus.Absent, "not installed");
         if (!File.Exists(Path.Combine(record.InstallDirectory, record.ExecutableName)))
             return (ProductStatus.Missing, "the installed executable is missing");
@@ -229,7 +229,7 @@ internal static class Program
     private static void CheckProducts()
     {
         var (status, detail) = InspectProduct();
-        var record = JsonState.TryRead<InstallState>(StatePath)?.Game;
+        var record = JsonState.TryRead<InstallState>(StatePath, StateJsonContext.Default)?.Game;
         Console.WriteLine(status == ProductStatus.Absent
             ? "Nothing installed."
             : $"game  {status.ToString().ToLowerInvariant(),-8} {detail}  {record?.InstallDirectory}");

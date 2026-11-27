@@ -125,7 +125,7 @@ The setup payload ships a portable build toolchain so a player's machine can com
 | LLVM-MinGW (Clang/LLD, mingw-w64 runtime) | Apache-2.0 WITH LLVM-exception; mingw-w64 under ZPL / public domain / MIT-style | <https://github.com/mstorsjo/llvm-mingw> |
 | CMake | BSD-3-Clause | <https://cmake.org/> |
 | Ninja | Apache-2.0 | <https://github.com/ninja-build/ninja> |
-| .NET runtime (self-contained setup host and translator) | MIT | <https://github.com/dotnet/runtime> |
+| .NET runtime (compiled into the Native AOT setup host and translator) | MIT | <https://github.com/dotnet/runtime> |
 | Tomlyn | BSD-2-Clause | <https://github.com/xoofx/Tomlyn> |
 | Microsoft Visual C++ runtime (Windows, app-local) | Microsoft redistributable terms | <https://visualstudio.microsoft.com/license-terms/> |
 
@@ -153,7 +153,7 @@ Not redistributed in any release artifact.
 | xUnit.net 2.4.2, xunit.runner.visualstudio 2.4.5 | Apache-2.0 |
 | Microsoft.NET.Test.Sdk 17.6.0 | MIT |
 | coverlet.collector 6.0.0 | MIT |
-| .NET 10 SDK | MIT |
+| .NET 11 SDK | MIT |
 
 ---
 

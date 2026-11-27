@@ -232,16 +232,16 @@ meta_path="$export_dir/meta.txt"
 assert_file "$meta_path" "Native prebuilt export metadata"
 get_meta() { awk -F= -v k="$1" '$0 ~ "^" k "=" { sub(/^[^=]*=/, ""); print; exit }' "$meta_path"; }
 
-# mkw_np_probe links exactly what mkw_runtime_common and the public products link, so building it
+# opuc_np_probe links exactly what opuc_runtime_common and the public products link, so building it
 # compiles the whole redistributable closure and nothing else - and a successful link proves the
 # harvested archives are complete. The runtime archive is outside that closure and built alongside.
-build_targets=(--target mkw_np_probe)
+build_targets=(--target opuc_np_probe)
 meta_runtime_fingerprint=$(get_meta runtime_fingerprint)
 if [[ -n "$meta_runtime_fingerprint" ]]; then
     if [[ -n "$runtime_fingerprint" && "$meta_runtime_fingerprint" != "$runtime_fingerprint" ]]; then
         fail "The configure's runtime fingerprint ($meta_runtime_fingerprint) differs from RuntimeFingerprint.cmake's ($runtime_fingerprint)"
     fi
-    build_targets+=(--target mkw_runtime)
+    build_targets+=(--target opuc_runtime)
 elif [[ -n "$runtime_fingerprint" ]]; then
     fail "The staging configure exported no runtime_fingerprint; the $arch package must carry the runtime archive"
 fi
@@ -286,12 +286,12 @@ load_vars() {
     local k v
     while IFS=$'\t' read -r k v; do dest["$k"]=$v; done < <(extract_ninja_vars "$build_ninja" "$2")
 }
-load_vars probe_compile   "CXX_COMPILER__mkw_np_probe_unscanned_Release"
-load_vars control_compile "CXX_COMPILER__mkw_np_probe_control_unscanned_Release"
-load_vars probe_link      "CXX_EXECUTABLE_LINKER__mkw_np_probe_Release"
-load_vars control_link    "CXX_EXECUTABLE_LINKER__mkw_np_probe_control_Release"
-[[ -n "${probe_compile[INCLUDES]+x}" ]] || fail "No Ninja statement used rule CXX_COMPILER__mkw_np_probe_unscanned_Release."
-[[ -n "${probe_link[LINK_LIBRARIES]+x}" ]] || fail "No Ninja statement used rule CXX_EXECUTABLE_LINKER__mkw_np_probe_Release."
+load_vars probe_compile   "CXX_COMPILER__opuc_np_probe_unscanned_Release"
+load_vars control_compile "CXX_COMPILER__opuc_np_probe_control_unscanned_Release"
+load_vars probe_link      "CXX_EXECUTABLE_LINKER__opuc_np_probe_Release"
+load_vars control_link    "CXX_EXECUTABLE_LINKER__opuc_np_probe_control_Release"
+[[ -n "${probe_compile[INCLUDES]+x}" ]] || fail "No Ninja statement used rule CXX_COMPILER__opuc_np_probe_unscanned_Release."
+[[ -n "${probe_link[LINK_LIBRARIES]+x}" ]] || fail "No Ninja statement used rule CXX_EXECUTABLE_LINKER__opuc_np_probe_Release."
 
 split_list() {
     # $1 = string value, $2 = name of the array to fill (nameref)
@@ -394,7 +394,7 @@ targets_txt="$export_dir/targets.txt"
 assert_file "$targets_txt" "Native prebuilt export targets list"
 while IFS='|' read -r name type file linkerfile; do
     [[ -n "$name" ]] || continue
-    [[ -f "$linkerfile" ]] || continue  # not part of the closure mkw_np_probe pulled in
+    [[ -f "$linkerfile" ]] || continue  # not part of the closure opuc_np_probe pulled in
     linkerfile=$(normalize "$linkerfile")
     relative_linker=$(copy_harvested "$linkerfile" lib)
     if [[ "$type" == "SHARED_LIBRARY" ]]; then
@@ -407,20 +407,20 @@ while IFS='|' read -r name type file linkerfile; do
             [[ -f "$file_abs" ]] || fail "Shared library $name has no runtime file: $file_abs"
             relative_runtime=$(copy_harvested "$file_abs" bin)
         fi
-        shared_import_targets+=("mkw_np::$name")
+        shared_import_targets+=("opuc_np::$name")
         shared_import_runtime+=("$relative_runtime")
         shared_import_implib+=("$relative_linker")
-        linker_file_to_reference["$linkerfile"]="mkw_np::$name"
+        linker_file_to_reference["$linkerfile"]="opuc_np::$name"
     else
         linker_file_to_reference["$linkerfile"]="@PKG@/$relative_linker"
     fi
 done < "$targets_txt"
 runtime_archive_ref=""
 if [[ -n "$meta_runtime_fingerprint" ]]; then
-    runtime_linker=$(awk -F'|' '$1 == "mkw_runtime" && $2 == "STATIC_LIBRARY" { print $4; exit }' "$targets_txt")
-    [[ -n "$runtime_linker" && -f "$runtime_linker" ]] || fail "The runtime archive (mkw_runtime) was not built"
+    runtime_linker=$(awk -F'|' '$1 == "opuc_runtime" && $2 == "STATIC_LIBRARY" { print $4; exit }' "$targets_txt")
+    [[ -n "$runtime_linker" && -f "$runtime_linker" ]] || fail "The runtime archive (opuc_runtime) was not built"
     runtime_archive_ref=${linker_file_to_reference["$(normalize "$runtime_linker")"]:-}
-    [[ "$runtime_archive_ref" == "@PKG@/lib/"* ]] || fail "The runtime archive (mkw_runtime) was not harvested"
+    [[ "$runtime_archive_ref" == "@PKG@/lib/"* ]] || fail "The runtime archive (opuc_runtime) was not harvested"
 fi
 # Unlike Windows (SDL/zlib/libpng ship as DLLs by default), everything here was forced static above
 # and Dawn's own Linux package (verified directly) ships libwebgpu_dawn.a, also static - so zero

@@ -1,7 +1,7 @@
 # The game-independent native runtime (runtime/src). One definition serves
 # three uses: the OBJECT library the products link from source, the STATIC
-# archive the native prebuilt export ships (mkw_runtime), and that archive
-# imported in place of compiling it (mkw_runtime_prebuilt).
+# archive the native prebuilt export ships (opuc_runtime), and that archive
+# imported in place of compiling it (opuc_runtime_prebuilt).
 
 include("${CMAKE_CURRENT_LIST_DIR}/RuntimeFingerprint.cmake")
 
@@ -64,21 +64,21 @@ endfunction()
 function(mkw_runtime_link_dependencies target scope)
     target_link_libraries(${target} ${scope}
         aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx)
-    target_link_libraries(${target} ${scope} mkw_platform mkw::pugixml mkw::toml11)
+    target_link_libraries(${target} ${scope} opuc_platform opuc::pugixml opuc::toml11)
     if(MKW_PLATFORM_WINDOWS)
         target_link_libraries(${target} ${scope} shell32 windowsapp bthprops advapi32)
     elseif(MKW_PLATFORM_LINUX OR MKW_PLATFORM_MACOS_X86_64)
         # ${CMAKE_DL_LIBS} for music_attenuation.cpp's dlopen of libdbus-1 (MPRIS
         # media monitoring). Empty on platforms where dl* is already in libc/libSystem.
-        target_link_libraries(${target} ${scope} mkw::libco ${CMAKE_DL_LIBS})
+        target_link_libraries(${target} ${scope} opuc::libco ${CMAKE_DL_LIBS})
     endif()
     if(MKW_PLATFORM_MACOS)
         # CoreAudio framework is required for automatic music muting on macOS.
         target_link_libraries(${target} ${scope} "${MKW_COREAUDIO_FRAMEWORK}")
         if(MKW_PLATFORM_MACOS_X86_64)
             # libco is used by Intel macOS. Apple Silicon uses the local
-            # x18-safe assembly backend and therefore does not define mkw::libco.
-            target_link_libraries(${target} ${scope} mkw::libco)
+            # x18-safe assembly backend and therefore does not define opuc::libco.
+            target_link_libraries(${target} ${scope} opuc::libco)
         endif()
     endif()
 endfunction()

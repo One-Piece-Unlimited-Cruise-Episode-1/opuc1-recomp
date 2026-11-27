@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Opuc1Recomp.Setup.Common;
 
@@ -29,7 +31,6 @@ public sealed class DelegatingInstallReporter : IInstallReporter
 /// </summary>
 public sealed class NdjsonInstallReporter : IInstallReporter
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
     private readonly string _version;
     private readonly Action<string>? _log;
     private readonly object _gate = new();
@@ -50,7 +51,7 @@ public sealed class NdjsonInstallReporter : IInstallReporter
             // Percentages are clamped monotonic: a caller's progress bar must never walk backwards
             // because a later stage happened to estimate a lower number.
             _lastPercent = Math.Clamp(Math.Max(percent, _lastPercent), 0, 99);
-            WriteLine(new { type = "progress", stage, message, percent = _lastPercent });
+            WriteLine(new ProgressLine("progress", stage, message, _lastPercent), NdjsonContext.Default.ProgressLine);
         }
         _log?.Invoke(message);
     }
@@ -67,7 +68,7 @@ public sealed class NdjsonInstallReporter : IInstallReporter
         {
             if (_finished) return;
             _finished = true;
-            WriteLine(new { type = "result", success = true, version = _version, installDir = installDirectory });
+            WriteLine(new SuccessLine("result", true, _version, installDirectory), NdjsonContext.Default.SuccessLine);
         }
     }
 
@@ -77,7 +78,7 @@ public sealed class NdjsonInstallReporter : IInstallReporter
         {
             if (_finished) return;
             _finished = true;
-            WriteLine(new { type = "result", success = false, error });
+            WriteLine(new FailureLine("result", false, error), NdjsonContext.Default.FailureLine);
         }
         _log?.Invoke("FAILED: " + error);
     }
@@ -88,12 +89,24 @@ public sealed class NdjsonInstallReporter : IInstallReporter
     /// </summary>
     public void EnsureFinished(string errorIfUnfinished) => Failure(errorIfUnfinished);
 
-    private static void WriteLine(object value)
+    private static void WriteLine<T>(T value, JsonTypeInfo<T> typeInfo)
     {
-        Console.Out.WriteLine(JsonSerializer.Serialize(value, Options));
+        Console.Out.WriteLine(JsonSerializer.Serialize(value, typeInfo));
         Console.Out.Flush();
     }
 }
+
+// The protocol's line shapes, property order as written (camelCase via NdjsonContext). Source-generated
+// because the setup hosts ship as Native AOT.
+internal sealed record ProgressLine(string Type, string Stage, string Message, int Percent);
+internal sealed record SuccessLine(string Type, bool Success, string Version, string InstallDir);
+internal sealed record FailureLine(string Type, bool Success, string Error);
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(ProgressLine))]
+[JsonSerializable(typeof(SuccessLine))]
+[JsonSerializable(typeof(FailureLine))]
+internal sealed partial class NdjsonContext : JsonSerializerContext;
 
 /// <summary>Plain-text console reporting for a run without <c>--progress-json</c>.</summary>
 public sealed class ConsoleInstallReporter : IInstallReporter

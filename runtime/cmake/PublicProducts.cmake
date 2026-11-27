@@ -1,7 +1,7 @@
 # Public One Piece: Unlimited Recompilation Episode 1 product graph.
 #
 # The translator owns the translated build graph. Mario Kart's profile-neutral
-# functions are compiled once into mkw_base_shared; only callers whose direct
+# functions are compiled once into opuc_base_shared; only callers whose direct
 # ABI differs between profiles receive small base/RR variants.
 
 # Per-game data the runtime reads but does not own. Kept out of the runtime
@@ -63,39 +63,39 @@ endfunction()
 
 mkw_select_runtime_provider()
 if(MKW_RUNTIME_USE_PREBUILT)
-    mkw_import_prebuilt_runtime(mkw_runtime_prebuilt "${MKW_NP_RUNTIME_ARCHIVE_PATH}")
+    mkw_import_prebuilt_runtime(opuc_runtime_prebuilt "${MKW_NP_RUNTIME_ARCHIVE_PATH}")
     # A replacement archive can carry an older mtime than the last link, so relink on fingerprint change.
-    set(MKW_RUNTIME_PREBUILT_STAMP "${CMAKE_BINARY_DIR}/mkw_runtime_prebuilt.stamp")
+    set(MKW_RUNTIME_PREBUILT_STAMP "${CMAKE_BINARY_DIR}/opuc_runtime_prebuilt.stamp")
     file(CONFIGURE OUTPUT "${MKW_RUNTIME_PREBUILT_STAMP}" CONTENT "${MKW_NP_RUNTIME_FINGERPRINT}\n")
 else()
-    mkw_add_runtime_library(mkw_runtime_common OBJECT ${SOURCES})
+    mkw_add_runtime_library(opuc_runtime_common OBJECT ${SOURCES})
 endif()
 
-add_library(mkw_game_data OBJECT ${MKW_GAME_DATA_SOURCES})
-mkw_configure_object_target(mkw_game_data)
-target_compile_features(mkw_game_data PRIVATE cxx_std_20)
-target_compile_definitions(mkw_game_data PRIVATE
+add_library(opuc_game_data OBJECT ${MKW_GAME_DATA_SOURCES})
+mkw_configure_object_target(opuc_game_data)
+target_compile_features(opuc_game_data PRIVATE cxx_std_20)
+target_compile_definitions(opuc_game_data PRIVATE
     SDL_MAIN_HANDLED
     _DISABLE_STRING_ANNOTATION _DISABLE_VECTOR_ANNOTATION)
 if(MKW_SETUP_VERSION)
     set_property(SOURCE "${MKW_RUNTIME_SOURCE_DIR}/game/setup_version.cpp" APPEND PROPERTY
         COMPILE_DEFINITIONS "MKW_SETUP_VERSION=\"${MKW_SETUP_VERSION}\"")
 endif()
-mkw_runtime_link_dependencies(mkw_game_data PRIVATE)
-set_target_properties(mkw_game_data PROPERTIES UNITY_BUILD OFF)
-mkw_apply_common_compile_options(mkw_game_data)
+mkw_runtime_link_dependencies(opuc_game_data PRIVATE)
+set_target_properties(opuc_game_data PROPERTIES UNITY_BUILD OFF)
+mkw_apply_common_compile_options(opuc_game_data)
 
 # Host ISA guard deliberately keeps the plain baseline ISA and checks the
 # selected x86 profile before optional instructions can execute. AArch64 has
 # no equivalent optional ISA floor to probe: NEON/FMA are architectural
 # requirements.
 if(MKW_HOST_IS_X86_64)
-    add_library(mkw_cpu_baseline OBJECT "${MKW_CPU_BASELINE_SOURCE}")
-    target_compile_features(mkw_cpu_baseline PRIVATE cxx_std_17)
-    set_target_properties(mkw_cpu_baseline PROPERTIES UNITY_BUILD OFF)
-    target_compile_options(mkw_cpu_baseline PRIVATE -w)
+    add_library(opuc_cpu_baseline OBJECT "${MKW_CPU_BASELINE_SOURCE}")
+    target_compile_features(opuc_cpu_baseline PRIVATE cxx_std_17)
+    set_target_properties(opuc_cpu_baseline PROPERTIES UNITY_BUILD OFF)
+    target_compile_options(opuc_cpu_baseline PRIVATE -w)
     if(MKW_X86_CPU_PROFILE STREQUAL "v2")
-        target_compile_definitions(mkw_cpu_baseline PRIVATE MKW_X86_CPU_PROFILE_V2=1)
+        target_compile_definitions(opuc_cpu_baseline PRIVATE MKW_X86_CPU_PROFILE_V2=1)
     endif()
 endif()
 
@@ -110,37 +110,37 @@ if(NOT EXISTS "${MKW_TRANSLATED_PCH}")
     set(MKW_TRANSLATED_PCH "${MKW_RUNTIME_SOURCE_DIR}/include/mkw_pch.h")
 endif()
 
-add_library(mkw_base_shared STATIC ${MKW_BASE_COMMON_SHARDS})
-mkw_configure_translated_target(mkw_base_shared)
-target_precompile_headers(mkw_base_shared PRIVATE "${MKW_TRANSLATED_PCH}")
+add_library(opuc_base_shared STATIC ${MKW_BASE_COMMON_SHARDS})
+mkw_configure_translated_target(opuc_base_shared)
+target_precompile_headers(opuc_base_shared PRIVATE "${MKW_TRANSLATED_PCH}")
 
 # Registration and indirect-dispatch tables are translator output too; they
 # compile with the translated configuration rather than inside the products.
-add_library(mkw_base_registration OBJECT ${MKW_BASE_REGISTRATION_SOURCES})
-mkw_configure_translated_target(mkw_base_registration)
-target_precompile_headers(mkw_base_registration REUSE_FROM mkw_base_shared)
+add_library(opuc_base_registration OBJECT ${MKW_BASE_REGISTRATION_SOURCES})
+mkw_configure_translated_target(opuc_base_registration)
+target_precompile_headers(opuc_base_registration REUSE_FROM opuc_base_shared)
 
 if(MKW_BASE_PORTABLE_SENSITIVE_SHARDS)
-    add_library(mkw_base_sensitive OBJECT ${MKW_BASE_PORTABLE_SENSITIVE_SHARDS})
-    mkw_configure_translated_target(mkw_base_sensitive)
-    target_precompile_headers(mkw_base_sensitive REUSE_FROM mkw_base_shared)
+    add_library(opuc_base_sensitive OBJECT ${MKW_BASE_PORTABLE_SENSITIVE_SHARDS})
+    mkw_configure_translated_target(opuc_base_sensitive)
+    target_precompile_headers(opuc_base_sensitive REUSE_FROM opuc_base_shared)
 endif()
 
 function(mkw_configure_product target)
-    if(TARGET mkw_runtime_common)
-        target_sources(${target} PRIVATE $<TARGET_OBJECTS:mkw_runtime_common>)
+    if(TARGET opuc_runtime_common)
+        target_sources(${target} PRIVATE $<TARGET_OBJECTS:opuc_runtime_common>)
     else()
         # Natives self-register from static constructors, so every archive
-        # member must be kept. Listed before mkw_base_shared so single-pass
+        # member must be kept. Listed before opuc_base_shared so single-pass
         # linkers resolve the runtime's references to translated functions.
-        target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,mkw_runtime_prebuilt>")
+        target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,opuc_runtime_prebuilt>")
         set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${MKW_RUNTIME_PREBUILT_STAMP}")
     endif()
-    target_sources(${target} PRIVATE $<TARGET_OBJECTS:mkw_game_data>)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:opuc_game_data>)
     # Startup CPU check. Must stay a separate object library so it keeps the
     # plain baseline ISA while everything around it is built for x86-64-v3.
     if(MKW_HOST_IS_X86_64)
-        target_sources(${target} PRIVATE $<TARGET_OBJECTS:mkw_cpu_baseline>)
+        target_sources(${target} PRIVATE $<TARGET_OBJECTS:opuc_cpu_baseline>)
     endif()
     target_include_directories(${target} PRIVATE
         "${MKW_RUNTIME_SOURCE_DIR}/include"
@@ -154,7 +154,7 @@ function(mkw_configure_product target)
     target_compile_features(${target} PRIVATE cxx_std_20)
     mkw_apply_common_compile_options(${target})
     target_link_libraries(${target} PRIVATE
-        mkw_platform mkw_base_shared mkw::pugixml mkw::toml11)
+        opuc_platform opuc_base_shared opuc::pugixml opuc::toml11)
 
     target_link_libraries(${target} PRIVATE
         aurora::gx aurora::pad aurora::si aurora::vi aurora::mtx)
@@ -184,15 +184,15 @@ function(mkw_configure_product target)
 
         set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE TRUE)
     elseif(MKW_PLATFORM_LINUX OR MKW_PLATFORM_MACOS_X86_64)
-        # mkw_runtime_common is an OBJECT library: opuc1_recomp only pulls in its .o
-        # files via $<TARGET_OBJECTS:>, which does not propagate mkw_runtime_common's own
+        # opuc_runtime_common is an OBJECT library: opuc1_recomp only pulls in its .o
+        # files via $<TARGET_OBJECTS:>, which does not propagate opuc_runtime_common's own
         # target_link_libraries (object libraries don't carry usage requirements to a consumer
         # that isn't itself linked against as a target). fiber_manager.cpp's co_* calls live in
-        # those objects, so the actual executable link needs mkw::libco directly, same as it
+        # those objects, so the actual executable link needs opuc::libco directly, same as it
         # needs it independently of that first `if(WIN32)` branch above. ${CMAKE_DL_LIBS} is
         # here for the same reason: music_attenuation.cpp's dlopen(libdbus-1) lives in those
         # objects (empty string on glibc >= 2.34, where dl* is in libc).
-        target_link_libraries(${target} PRIVATE mkw::libco ${CMAKE_DL_LIBS})
+        target_link_libraries(${target} PRIVATE opuc::libco ${CMAKE_DL_LIBS})
     endif()
     if(MKW_PLATFORM_WINDOWS)
         foreach(runtime_dll libc++.dll libunwind.dll)
@@ -258,18 +258,16 @@ mkw_configure_product(opuc1_recomp)
 # The binary is opuc1-recomp.exe.
 set_target_properties(opuc1_recomp PROPERTIES OUTPUT_NAME "opuc1-recomp")
 mkw_add_product_icon(opuc1_recomp)
-target_sources(opuc1_recomp PRIVATE $<TARGET_OBJECTS:mkw_base_registration>)
+target_sources(opuc1_recomp PRIVATE $<TARGET_OBJECTS:opuc_base_registration>)
 target_precompile_headers(opuc1_recomp PRIVATE
     "${MKW_RUNTIME_SOURCE_DIR}/include/mkw_pch.h")
-if(TARGET mkw_base_sensitive)
-    target_sources(opuc1_recomp PRIVATE $<TARGET_OBJECTS:mkw_base_sensitive>)
+if(TARGET opuc_base_sensitive)
+    target_sources(opuc1_recomp PRIVATE $<TARGET_OBJECTS:opuc_base_sensitive>)
 endif()
 
-add_custom_target(mkw_release DEPENDS opuc1_recomp)
-
-# mkw_runtime_common gets the same flags from mkw_add_runtime_library.
+# opuc_runtime_common gets the same flags from mkw_add_runtime_library.
 set(MKW_ALL_BUILD_TARGETS
-    mkw_game_data mkw_base_shared mkw_base_registration mkw_base_sensitive opuc1_recomp)
+    opuc_game_data opuc_base_shared opuc_base_registration opuc_base_sensitive opuc1_recomp)
 foreach(target IN LISTS MKW_ALL_BUILD_TARGETS)
     if(TARGET ${target})
         mkw_apply_baseline_arch(${target})

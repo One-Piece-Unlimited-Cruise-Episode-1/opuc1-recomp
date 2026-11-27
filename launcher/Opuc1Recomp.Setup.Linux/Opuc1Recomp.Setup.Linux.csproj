@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>opuc1-recomp-setup</AssemblyName>
@@ -12,6 +12,23 @@
     <DebugType>embedded</DebugType>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <!-- Released as a Native AOT executable (build-appimage.sh / package.yml: dotnet publish -r <rid>);
+       plain builds stay JIT. Native AOT does not cross-compile between operating systems, so each
+       Linux/macOS release is published on its own OS. The feature switches drop runtime code the
+       setup never uses. -->
+  <PropertyGroup>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <!-- Trim/AOT analyzer findings fail the build instead of shipping a host that breaks at run time. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EventSourceSupport>false</EventSourceSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <MetricsSupport>false</MetricsSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <Http3Support>false</Http3Support>
+    <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Opuc1Recomp.Setup.Common\Opuc1Recomp.Setup.Common.csproj" />

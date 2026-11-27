@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -14,12 +14,30 @@
     <Product>One Piece: Unlimited Recompilation Episode 1 Translator</Product>
   </PropertyGroup>
 
+  <!-- Released as a Native AOT executable (dotnet publish -r <rid>); plain builds stay JIT.
+       PublishAot also runs the trim/AOT analyzers on every build, and TreatWarningsAsErrors turns
+       their findings into errors. The feature switches drop runtime code the translator never uses. -->
+  <PropertyGroup>
+    <PublishAot>true</PublishAot>
+    <!-- Measured on the OPUC1 DOL (win-x64): Size 6.6 MiB / 7.3 s, Speed 8.2 MiB / 7.0 s, identical output. -->
+    <OptimizationPreference>Size</OptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EventSourceSupport>false</EventSourceSupport>
+    <DebuggerSupport>false</DebuggerSupport>
+    <MetricsSupport>false</MetricsSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <Http3Support>false</Http3Support>
+    <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Translator.Core\Translator.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="YamlDotNet" Version="15.1.2" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
 
 </Project>

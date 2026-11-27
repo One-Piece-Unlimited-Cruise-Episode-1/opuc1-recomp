@@ -126,7 +126,7 @@ internal sealed class ProductRepairService
         if (gameOutput is not null)
         {
             var statePath = Path.Combine(scratchRoot, InstalledLayout.InstallStateFileName);
-            JsonState.Write(statePath, BuildUpdatedInstallState(expectedDolSha256));
+            JsonState.Write(statePath, BuildUpdatedInstallState(expectedDolSha256), StateJsonContext.Default);
             entries.Add(InstallTransactionEntry.File(statePath, _installation.InstallStatePath));
         }
 

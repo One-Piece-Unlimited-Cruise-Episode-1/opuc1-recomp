@@ -6,9 +6,9 @@
 #
 # clang/lld/llvm-ar: pruned from the official llvm.org GitHub release tarball (NOT llvm-mingw -
 # that project targets Windows/mingw, never native Linux) down to just what's needed to compile
-# and link: clang, lld, llvm-ar, the clang resource dir (builtin headers + compiler-rt), and
-# libc++/libc++abi/libunwind (so the toolchain never has to fall back to the host's system
-# libstdc++ headers). The raw release is ~1.9 GiB per arch (every LLVM backend, mlir, flang, lldb,
+# and link: clang, lld, llvm-ar, and the clang resource dir (builtin headers + compiler-rt's
+# builtins). The host's libstdc++ is used, as before; libc++ and the sanitizer runtimes are not
+# bundled. The raw release is ~1.9 GiB per arch (every LLVM backend, mlir, flang, lldb,
 # docs, tests); pruned it is ~500 MiB uncompressed / ~100 MiB compressed, verified against a real
 # build of this project.
 #
@@ -104,14 +104,15 @@ download_verified() {
     mv "$tmp" "$dest"
 }
 
-if [[ -x "$toolchain_dir/bin/clang" && -x "$toolchain_dir/bin/ninja" && -x "$toolchain_dir/bin/cmake" ]]; then
+if [[ -x "$toolchain_dir/bin/clang" && -x "$toolchain_dir/bin/ninja" && -x "$toolchain_dir/bin/cmake" &&
+      "$(cat "$toolchain_dir/.prune-version" 2>/dev/null)" == 2 ]]; then
     echo "prepare-portable-tools.sh: reusing existing toolchain at $toolchain_dir"
     exit 0
 fi
 
 work="$destination/.building-toolchain-$arch"
 rm -rf "$work"
-mkdir -p "$work/bin" "$work/lib/$target_triple" "$work/include/$target_triple/c++/v1"
+mkdir -p "$work/bin"
 
 # --- clang/lld/llvm-ar, pruned from the official LLVM release ---
 # built from PR https://github.com/llvm/llvm-project/pull/222821 on official LLVM Github Actions Runner
@@ -153,17 +154,25 @@ cp -a "$src/bin/llvm-ar" "$work/bin/"
 strip "$work/bin/llvm-ar"
 ln -s llvm-ar "$work/bin/llvm-ranlib"
 
-# Clang's resource directory: builtin headers (stddef.h, immintrin.h, ...) and compiler-rt
-# (builtins, sanitizer runtimes). `clang -print-resource-dir` must find this at lib/clang/<ver>/.
-cp -a "$src/lib/clang" "$work/lib/"
+# Clang's resource directory, which `clang -print-resource-dir` must find at lib/clang/<ver>/: the
+# builtin headers (stddef.h, immintrin.h, ...) and, of compiler-rt, only the builtins archive and
+# the crtbegin/crtend objects a -rtlib=compiler-rt link would use. Nothing here is sanitized,
+# fuzzed, profiled or XRay-instrumented, so those runtimes and their share/ ignorelists stay out.
+# local-build.sh links against the host's libstdc++/libgcc (the release clang's defaults); the
+# release's libc++/libc++abi/libunwind are not bundled because nothing passes -stdlib=libc++.
+resource_dirs=("$src"/lib/clang/*/)
+[[ ${#resource_dirs[@]} -eq 1 && -d "${resource_dirs[0]}" ]] ||
+    { echo "prepare-portable-tools.sh: expected one clang resource directory in $src/lib/clang" >&2; exit 1; }
+resource_version=$(basename "${resource_dirs[0]}")
+mkdir -p "$work/lib/clang/$resource_version/lib/$target_triple"
+cp -a "$src/lib/clang/$resource_version/include" "$work/lib/clang/$resource_version/"
+for runtime in libclang_rt.builtins.a clang_rt.crtbegin.o clang_rt.crtend.o; do
+    runtime_path="$src/lib/clang/$resource_version/lib/$target_triple/$runtime"
+    if [[ -f "$runtime_path" ]]; then cp -a "$runtime_path" "$work/lib/clang/$resource_version/lib/$target_triple/"; fi
+done
 
-# libc++/libc++abi/libunwind: so this toolchain never has to fall back to whatever libstdc++ the
-# host distro happens to have installed. Not the default yet (local-build.sh still resolves the
-# system libstdc++ unless -stdlib=libc++ is passed), but bundled so that option exists.
-cp -a "$src/include/c++" "$work/include/"
-cp -a "$src/include/$target_triple/c++/v1/__config_site" "$work/include/$target_triple/c++/v1/"
-cp -a "$src/lib/$target_triple"/libc++.a "$src/lib/$target_triple"/libc++abi.a "$src/lib/$target_triple"/libunwind.a "$work/lib/$target_triple/"
-cp -a "$src/lib/$target_triple"/libc++.so* "$src/lib/$target_triple"/libc++abi.so* "$src/lib/$target_triple"/libunwind.so* "$work/lib/$target_triple/"
+# Marks a toolchain directory staged with this pruning, so an older, fuller one is rebuilt.
+echo 2 > "$work/.prune-version"
 
 rm -rf "$extract_root"
 

@@ -73,7 +73,7 @@ internal sealed class InstallTransaction : IDisposable
         };
 
         Directory.CreateDirectory(Path.Combine(workRoot, "backup"));
-        JsonState.Write(journalPath, journal);
+        JsonState.Write(journalPath, journal, StateJsonContext.Default);
         return new InstallTransaction(journalPath, journal, reporter);
     }
 
@@ -150,7 +150,7 @@ internal sealed class InstallTransaction : IDisposable
         var journalPath = InstallOperationPaths.GetJournalPath(root);
         if (!File.Exists(journalPath)) return;
 
-        var journal = JsonState.TryRead<TransactionJournal>(journalPath)
+        var journal = JsonState.TryRead<TransactionJournal>(journalPath, StateJsonContext.Default)
                       ?? throw new InvalidDataException(
                           $"The interrupted-install journal is unreadable: {journalPath}");
         ValidateJournal(root, journal);
@@ -298,7 +298,7 @@ internal sealed class InstallTransaction : IDisposable
             throw new InvalidOperationException("The install transaction is not in the required state.");
     }
 
-    private void WriteJournal() => JsonState.Write(_journalPath, _journal);
+    private void WriteJournal() => JsonState.Write(_journalPath, _journal, StateJsonContext.Default);
 
     private static bool Exists(string path, InstallTransactionEntryKind kind) =>
         kind == InstallTransactionEntryKind.Directory ? Directory.Exists(path) : File.Exists(path);
@@ -358,7 +358,7 @@ internal sealed class InstallTransaction : IDisposable
         }
     }
 
-    private sealed class TransactionJournal
+    internal sealed class TransactionJournal
     {
         public TransactionJournal() { }
 
@@ -373,7 +373,7 @@ internal sealed class InstallTransaction : IDisposable
         public byte[]? RuntimeConfigContents { get; set; }
     }
 
-    private sealed class TransactionJournalEntry
+    internal sealed class TransactionJournalEntry
     {
         public TransactionJournalEntry() { }
 
@@ -384,7 +384,7 @@ internal sealed class InstallTransaction : IDisposable
         public bool OriginalExisted { get; set; }
     }
 
-    private enum TransactionState
+    internal enum TransactionState
     {
         Prepared,
         Published,

@@ -26,7 +26,7 @@ if (-not $llvm) {
 $llvm = $llvm -replace '\\', '/'
 $env:Path = ($llvm -replace '/', '\') + ';' + $env:Path
 $dolphinDb = if ($env:OPUC_DOLPHIN_DSY) { $env:OPUC_DOLPHIN_DSY } else { "$data/totaldb.dsy" }
-$translator = "$root/translator/src/Translator.Cli/bin/Release/net10.0/Translator.Cli.dll"
+$translator = "$root/translator/src/Translator.Cli/bin/Release/net11.0/Translator.Cli.dll"
 $project = "$root/projects/opuc1/recomp.yml"
 $logs = "$root/build/logs"
 New-Item -ItemType Directory -Force $logs | Out-Null

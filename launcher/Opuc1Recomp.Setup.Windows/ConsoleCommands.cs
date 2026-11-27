@@ -53,11 +53,11 @@ internal static class ConsoleCommands
             components.NativeToolchain,
             ToolkitFingerprint.ComputePackage(root),
             ToolkitFingerprint.ComputeRuntimeAssets(root));
-        Console.Out.WriteLine(JsonSerializer.Serialize(identities));
+        Console.Out.WriteLine(JsonSerializer.Serialize(identities, PayloadIdentitiesJsonContext.Default.PayloadIdentities));
         return 0;
     }
 
-    private sealed record PayloadIdentities(string ToolkitFingerprint, string TranslationFingerprint,
+    internal sealed record PayloadIdentities(string ToolkitFingerprint, string TranslationFingerprint,
         string NativeToolchainFingerprint, string ToolkitPackageFingerprint,
         string RuntimeAssetsFingerprint);
 
@@ -246,12 +246,14 @@ internal static class ConsoleCommands
 
     /// <summary>Emits the stable <c>products</c> record. Callers branch on <c>status</c> only.</summary>
     internal static string SerializeProductsReport(ProductsReport report) =>
-        JsonSerializer.Serialize(new
-        {
-            type = "products",
-            setupVersion = ProductInfo.Version,
-            installDir = report.InstallDirectory,
-            rebuildRequired = report.RebuildRequired,
-            game = new { status = report.Game.Reason, detail = report.Game.Detail }
-        });
+        JsonSerializer.Serialize(
+            new ProductsRecord("products", ProductInfo.Version, report.InstallDirectory, report.RebuildRequired,
+                new ProductsGameRecord(report.Game.Reason, report.Game.Detail)),
+            ProductsJsonContext.Default.ProductsRecord);
+
+    // The products record's wire shape, in this property order (camelCase via ProductsJsonContext).
+    internal sealed record ProductsRecord(
+        string Type, string SetupVersion, string InstallDir, bool RebuildRequired, ProductsGameRecord Game);
+
+    internal sealed record ProductsGameRecord(string Status, string Detail);
 }

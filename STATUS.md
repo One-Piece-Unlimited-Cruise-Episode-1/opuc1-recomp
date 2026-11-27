@@ -342,9 +342,18 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   - `native_cpu_calls.inc`: 38 native-call shortcuts keyed by Mario Kart addresses. None is an OPUC function start.
   - The Mario Kart `initial_pipeline_cache.db` seed and the configure check that required it. Aurora starts without a
     seed and logs that none was found.
-- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): all 19 pass. `mkw_system_bridge_tests` used
+- Runtime ctest (`ctest --test-dir build/native`, LLVM-MinGW bin on PATH): all 19 pass. `opuc_system_bridge_tests` used
   to expect Mario Kart constructor tables (DOL + StaticR.rel); it now checks that the runtime runs no constructor itself
   (OPUC's `__init_cpp` does). CI does not run ctest.
+- CMake targets renamed from the Mario Kart `mkw_` prefix to `opuc_` (2026-11-27): every library (`opuc_platform`,
+  `opuc_runtime_common`, `opuc_base_shared`, `opuc::libco` / `opuc::pugixml` / `opuc::toml11`, the prebuilt
+  `opuc_runtime` archive and its `opuc_np::` imports), every test executable and ctest name (`opuc_*_tests`), and the
+  CMake project (`opuc1_recomp`). The unused `mkw_release` and `mkw_platform_paths_check` custom targets are gone.
+  Unchanged: `MKW_*` cache options and C++ macros, the `mkw_*` CMake helper functions, and the
+  `.mkw_recompiled_managed_nand` marker in existing user NAND folders. A native prebuilt package made before the rename
+  still works (its own `native_prebuilt.cmake` defines its `mkw_np::` imports and names `libmkw_runtime.a`), but the
+  runtime fingerprint covers `runtime/cmake/`, so its runtime archive no longer matches and the runtime compiles from
+  source until the package is regenerated.
 
 - Basis: WiiCompiled (translator and runtime, GPL-3.0, with its aurora fork, MIT). See `docs/reference-study.md`.
   That name appears only where the basis is credited: README.md (Credits), docs/reference-study.md, the UPSTREAM.txt

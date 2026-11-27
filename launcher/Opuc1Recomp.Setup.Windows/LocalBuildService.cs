@@ -95,7 +95,7 @@ internal sealed class LocalBuildService
         if (!File.Exists(executable))
             throw new FileNotFoundException("Cannot record build provenance because the compiled executable is missing.",
                 executable);
-        var local = JsonState.TryRead<LocalBuildProvenance>(Path.Combine(outputDirectory, LocalBuildProvenance.FileName));
+        var local = JsonState.TryRead<LocalBuildProvenance>(Path.Combine(outputDirectory, LocalBuildProvenance.FileName), StateJsonContext.Default);
         if (local is not { SchemaVersion: 1 } ||
             !string.Equals(local.DolSha256, dolSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The local build did not translate the expected main.dol.");
@@ -106,6 +106,6 @@ internal sealed class LocalBuildService
             ToolkitFingerprint = toolkitFingerprint,
             DolSha256 = dolSha256,
             ExecutableSha256 = InputValidation.Sha256File(executable)
-        });
+        }, StateJsonContext.Default);
     }
 }
