@@ -35,11 +35,15 @@ std::shared_ptr<Page> DevPage();
 // The game's DebugFlag names switched on from the Debug page (DebugFlag::IsEnabled 80102514 answers them).
 bool DebugFlagOn(std::string_view name);
 
-// Per frame on the game thread (KPADRead): Infinite SP, Freeze enemies, the State text readout.
+// Per frame on the game thread (KPADRead): Freeze enemies, the State text readout.
 void Tick();
 
-// The Invincible switch, for the HP wrapper in dev_pages.cpp.
-bool Invincible();
+// The Infinite HP / Infinite SP switches, for the PlayStatus wrappers in dev_pages.cpp.
+bool InfiniteHp();
+bool InfiniteSp();
+
+// Test helper OPUC_TEST_STATUS_HIT (dev_pages.cpp), once per field camera frame (the Solo camera wrapper).
+void TestFieldFrame(const CpuContext& c);
 
 // The State text readout for the overlay (empty = off).
 std::string StateText();

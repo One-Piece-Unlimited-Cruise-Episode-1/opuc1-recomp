@@ -3,8 +3,9 @@
 // and what A does, in terms of the game's own state:
 //   Debug    the game's DebugFlag names (DebugFlag::IsEnabled 80102514, retail always false; vault
 //            entities/debug-flags.md) answered true while switched on, and the Play tab's own switches: Freeze
-//            enemies (EnemyManager +0xE, what the script EnemyStop(true) writes), Invincible (damage to the leader's
-//            HP refused), Infinite SP (SP current kept at its max), Wii button art ([game] pc_button_art off), State
+//            enemies (EnemyManager +0xE, what the script EnemyStop(true) writes), Infinite HP / Infinite SP (any
+//            lowering of the leader's HP / SP, current or max, refused where the game writes it: PlayStatus::ApplyValue
+//            804d8bb8 and the HP SetMax store), Wii button art ([game] pc_button_art off), State
 //            text (a corner readout in the overlay).
 //   Flags    the save's flag records, edited in place (vault entities/save-adventure-records.md).
 //   Fishing  the fishing switches (fishing_pc.cpp), the spot table of this island, the fully upgraded rod.
@@ -58,7 +59,7 @@ Row OnOff(std::u16string label, std::u16string desc, bool on, std::function<void
 // --- Debug ----------------------------------------------------------------------------------------------------
 std::mutex g_mutex;          // the flags below are read by the overlay thread too
 std::set<std::string, std::less<>> g_flags;  // DebugFlag names switched on
-bool g_freeze = false, g_invincible = false, g_infiniteSp = false, g_stateText = false;
+bool g_freeze = false, g_infiniteHp = false, g_infiniteSp = false, g_stateText = false;
 std::string g_stateLine;
 
 bool FlagOn(std::string_view name) {
@@ -91,9 +92,9 @@ std::vector<Row> DebugRows(const CpuContext&) {
     }
     rows.push_back(OnOff(u"Freeze enemies", u"Not in the game: enemy AI stops (as the script EnemyStop(true)).", g_freeze,
                          [](const CpuContext&) { g_freeze = !g_freeze; if (!g_freeze) Tick(); }));
-    rows.push_back(OnOff(u"Invincible", u"Not in the game: the player takes no damage.", g_invincible,
-                         [](const CpuContext&) { g_invincible = !g_invincible; }));
-    rows.push_back(OnOff(u"Infinite SP", u"Not in the game: SP stays full.", g_infiniteSp,
+    rows.push_back(OnOff(u"Infinite HP", u"Not in the game: the leader’s HP never goes down.", g_infiniteHp,
+                         [](const CpuContext&) { g_infiniteHp = !g_infiniteHp; }));
+    rows.push_back(OnOff(u"Infinite SP", u"Not in the game: the leader’s SP and SP max never go down.", g_infiniteSp,
                          [](const CpuContext&) { g_infiniteSp = !g_infiniteSp; }));
     rows.push_back(OnOff(u"Wii button art",
                          u"Menus, tutorials, the check bubbles, the window prompt and the tool guides show the game\u2019s "
@@ -183,7 +184,7 @@ std::vector<Row> SpotRows(const CpuContext& c) {
     return out;
 }
 
-// --- per frame: Infinite SP, Freeze enemies, the State text -------------------------------------------------------
+// --- per frame: Freeze enemies, the State text ---------------------------------------------------------------------
 // Leader: *(CharaManager (0x8068A18C) + 0x88). PlayObj PO = **(chara + 0x20); status slot PS = **(*(PO + 0x3C) + 0x34);
 // PS +0x40 / +0x44 point at the HP / SP PlayStatus (+0 int* current, +4 int* max, +8 int* base max).
 constexpr uint32_t kCharaManagerPtr = 0x8068A18C;
@@ -530,7 +531,42 @@ std::shared_ptr<Page> DevPage() {
 }
 
 bool DebugFlagOn(std::string_view name) { return FlagOn(name); }
-bool Invincible() { return g_invincible; }
+bool InfiniteHp() { return g_infiniteHp; }
+bool InfiniteSp() { return g_infiniteSp; }
+
+// Test helpers. OPUC_TEST_INFINITE="hp,sp" switches Infinite HP / SP on at start. OPUC_TEST_STATUS_HIT=<frames>: that
+// many field camera frames in, the leader's gauges get the game's own calls once, AddCurrent(HP, -30),
+// SetMax(HP, max / 2), AddCurrent(SP, -40), AddMax(SP, -50), with the values logged before and after.
+void TestInit() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    if (const char* e = std::getenv("OPUC_TEST_INFINITE")) {
+        g_infiniteHp = std::strstr(e, "hp") != nullptr;
+        g_infiniteSp = std::strstr(e, "sp") != nullptr;
+        RT_LOG(RT_TAG_HLE) << "[opuc] test: Infinite HP " << g_infiniteHp << ", Infinite SP " << g_infiniteSp << std::endl;
+    }
+}
+
+void TestFieldFrame(const CpuContext& c) {
+    static int frames = -1;
+    static const char* e = std::getenv("OPUC_TEST_STATUS_HIT");
+    if (!e) return;
+    if (frames < 0) frames = std::atoi(e);
+    if (frames == 0 || --frames != 0) return;
+    const uint32_t hp = LeaderStatus(0), sp = LeaderStatus(1);
+    if (!hp || !sp) { frames = 1; return; }
+    auto line = [&](const char* when) {
+        RT_LOG(RT_TAG_HLE) << "[opuc] test: status hit " << when << ": HP " << StatusValue(hp, 0) << "/" << StatusValue(hp, 1)
+                           << " SP " << StatusValue(sp, 0) << "/" << StatusValue(sp, 1) << std::endl;
+    };
+    line("before");
+    Call(c, 0x804D8DEC, {hp, static_cast<uint32_t>(-30), 0});               // PlayStatus::AddCurrent
+    Call(c, 0x804D8A84, {hp, static_cast<uint32_t>(StatusValue(hp, 1) / 2)}); // PlayStatus::SetMax
+    Call(c, 0x804D8DEC, {sp, static_cast<uint32_t>(-40), 0});
+    Call(c, 0x804D8B0C, {sp, static_cast<uint32_t>(-50), 0});               // PlayStatus::AddMax
+    line("after");
+}
 
 std::string StateText() {
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -538,6 +574,7 @@ std::string StateText() {
 }
 
 void Tick() {
+    TestInit();
     // Freeze enemies: EnemyManager +0xE as EnemyStop(true / false) writes it; held each frame while on, so a script's
     // EnemyStop(false) does not undo it.
     const uint32_t em = Memory::Read32(kEnemyManagerPtr);
@@ -548,18 +585,6 @@ void Tick() {
     if (g_freeze != g_wasFreeze)
         RT_LOG(RT_TAG_HLE) << "[opuc] dev menu: EnemyStop byte " << (GuestPtr(em) ? int(Memory::Read8(em + 0xE)) : -1) << std::endl;
     g_wasFreeze = g_freeze;
-    if (g_infiniteSp) {
-        if (const uint32_t sp = LeaderStatus(1)) {
-            const int32_t mx = StatusValue(sp, 1);
-            const int32_t cur = StatusValue(sp, 0);
-            if (mx > 0 && cur < mx) {
-                Memory::Write32(Deref(sp), static_cast<uint32_t>(mx));
-                static int refills = 0;
-                if (std::getenv("OPUC_TRACE_HP") && (++refills % 30) == 1)
-                    RT_LOG(RT_TAG_HLE) << "[opuc] dev menu: Infinite SP: SP " << cur << " -> " << mx << " (refill " << refills << ")" << std::endl;
-            }
-        }
-    }
     bool want;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -589,25 +614,71 @@ void Tick() {
 
 }  // namespace OpucDev
 
-// PlayStatus::SetCurrent(status, newValue, opts) 804d8da0: every notified change of a current value (AddCurrent
-// 804d8dec / AddCurrentB 804d8dbc for status ticks, SetCurrentThunk 804d8de8 for hits and wall bumps, ring-out
-// falls) ends here. Invincible: a lower value for the leader's HP is refused.
-extern "C" void OpucDev_PlayStatusSetCurrent(CpuContext* ctx) {
+// Infinite HP / Infinite SP. PlayStatus::ApplyValue(self r3, int* slot r4, int* limit r5, flags* r6, notify r7,
+// new absolute value r8, options r9) 804d8bb8 writes every status value: SetCurrent 804d8da0 (and through it
+// AddCurrent / AddCurrentB / SetCurrentThunk / IncCurrent: hits, status ticks, ring-out falls, evade and skill costs,
+// script natives), AddMax 804d8b0c (the SP max a C+A / C+shake spends, then current), RestoreFull and SetMax call it
+// (vault entities/player-locomotion). slot == *(self + 4) is the max, *(self + 0) the current value. For the leader's
+// HP / SP a lower request becomes the old value (no decrease flag, no OnDecrease callback), and a value the clamp to
+// the limit still lowered is put back after the call. The HP gauge's SetMax 804d8a84 stores *max directly (flag 0x20
+// clear) and is refused there. Before 2026-11-28 Infinite SP refilled SP current once a frame, so AddMax still took
+// the SP max down and each special move left less, and Invincible refused only SetCurrent.
+namespace {
+int LeaderGauge(uint32_t self) {
+    if (self == OpucDev::LeaderStatus(0)) return 0;
+    if (self == OpucDev::LeaderStatus(1)) return 1;
+    return -1;
+}
+bool KeepGauge(int which) { return which == 0 ? OpucDev::InfiniteHp() : which == 1 && OpucDev::InfiniteSp(); }
+}  // namespace
+
+extern "C" void OpucDev_PlayStatusApplyValue(CpuContext* ctx) {
     static const bool trace = std::getenv("OPUC_TRACE_HP") != nullptr;
-    if (OpucDev::Invincible() || trace) {
-        const uint32_t self = ctx->gpr[3];
-        const uint32_t hp = OpucDev::LeaderStatus(0);
-        if (hp && self == hp) {
-            const int32_t now = OpucDev::StatusValue(hp, 0), next = static_cast<int32_t>(ctx->gpr[4]);
-            if (trace && next != now)
-                RT_LOG(RT_TAG_HLE) << "[opuc] dev menu: leader HP " << now << " -> " << next
-                                   << (OpucDev::Invincible() && next < now ? " refused (Invincible)" : "") << std::endl;
-            if (OpucDev::Invincible() && next < now) return;
+    const uint32_t self = ctx->gpr[3], slot = ctx->gpr[4];
+    const int which = (OpucDev::InfiniteHp() || OpucDev::InfiniteSp() || trace) ? LeaderGauge(self) : -1;
+    if (which < 0 || !OpucDev::GuestPtr(slot)) {
+        GuestFunctions::NextTranslation(0x804D8BB8)(ctx);
+        return;
+    }
+    const bool keep = KeepGauge(which);
+    const bool isMax = slot == Memory::Read32(self + 4);
+    const int32_t old = static_cast<int32_t>(Memory::Read32(slot));
+    const int32_t want = static_cast<int32_t>(ctx->gpr[8]);
+    if (keep && want < old) ctx->gpr[8] = static_cast<uint32_t>(old);
+    GuestFunctions::NextTranslation(0x804D8BB8)(ctx);
+    int32_t now = static_cast<int32_t>(Memory::Read32(slot));
+    if (keep && now < old) {
+        Memory::Write32(slot, static_cast<uint32_t>(old));
+        now = old;
+    }
+    if (trace && want < old)
+        RT_LOG(RT_TAG_HLE) << "[opuc] dev menu: leader " << (which ? "SP" : "HP") << (isMax ? " max " : " ") << old
+                           << " -> " << want
+                           << (keep && want < old ? (which ? " refused (Infinite SP)" : " refused (Infinite HP)") : "")
+                           << ", now " << now << std::endl;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x804D8BB8, OpucDev_PlayStatusApplyValue, "OpucDev_PlayStatusApplyValue");
+
+// PlayStatus::SetMax(self r3, value r4) 804d8a84: with flag 0x20 clear (the HP gauge) it stores *max = value without
+// ApplyValue (CharaSetHp / CharaSetSp script modes, the form teardown halving).
+extern "C" void OpucDev_PlayStatusSetMax(CpuContext* ctx) {
+    const uint32_t self = ctx->gpr[3];
+    const int which = (OpucDev::InfiniteHp() || OpucDev::InfiniteSp()) ? LeaderGauge(self) : -1;
+    if (which >= 0 && KeepGauge(which)) {
+        const uint32_t maxPtr = Memory::Read32(self + 4);
+        if (OpucDev::GuestPtr(maxPtr)) {
+            const int32_t old = static_cast<int32_t>(Memory::Read32(maxPtr));
+            if (static_cast<int32_t>(ctx->gpr[4]) < old) {
+                if (std::getenv("OPUC_TRACE_HP"))
+                    RT_LOG(RT_TAG_HLE) << "[opuc] dev menu: leader " << (which ? "SP" : "HP") << " SetMax " << old
+                                       << " -> " << static_cast<int32_t>(ctx->gpr[4]) << " refused" << std::endl;
+                ctx->gpr[4] = static_cast<uint32_t>(old);
+            }
         }
     }
-    GuestFunctions::NextTranslation(0x804D8DA0)(ctx);
+    GuestFunctions::NextTranslation(0x804D8A84)(ctx);
 }
-REGISTER_NATIVE_WRAPPER_AS(0x804D8DA0, OpucDev_PlayStatusSetCurrent, "OpucDev_PlayStatusSetCurrent");
+REGISTER_NATIVE_WRAPPER_AS(0x804D8A84, OpucDev_PlayStatusSetMax, "OpucDev_PlayStatusSetMax");
 
 // Fish always bite (Play tab fish_alwaysbite). CharaFishing::PickFishSlot(f1 lineDistM, work, fishpRow) 80036254
 // returns a slot 0-4 or -1; in state 3 it runs every tick before the bite timer test, and when the timer (+0x94) is

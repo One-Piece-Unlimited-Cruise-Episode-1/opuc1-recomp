@@ -6,9 +6,11 @@
 //    the disc pictures and recorded, per picture, the drawing operations that use the game picture (copies,
 //    stretches, mirrors, clears: geometry only) and a layer with only the keyglyph.js glyphs (pc_art.inc). Here the
 //    operations are replayed on the user's disc picture and the glyph layer is laid over it. A picture whose size
-//    differs from the one recorded (another language's pack) keeps the game's art. 44 are ALIGs and get a new
-//    texture; the check bubbles 0xA00490 / 93 / 94 / 95 are single-frame ALTX atlases with a centre pivot, so the
-//    atlas texture the game built keeps its frame table and gets the new image through SetImage.
+//    differs from the one recorded (another language's pack) keeps the game's art. 48 are ALIGs and get a new
+//    texture; the check bubbles 0xA00490 / 93 / 94 / 95 and the title's "PRESS (A)" 0xA10040 are single-frame ALTX
+//    atlases, so the atlas texture the game built keeps its frame table and gets the new image through SetImage.
+//    Added 2026-11-28: the title's PRESS (A) 0xA10040 and the record book's C 0xA1000E (Title/TitleTop.aar,
+//    TitleMenu.aar), the Gaburi / Franky mission window's "(A) Activated!!" / "(A) Can't Use" bars 0xA000C0-C2.
 //  - The tutorial texts that name a button twice or by a press the PC key does differently (pcart.js TEXT,
 //    WinComText rows 2 and 4) are reworded while the tutorial window copies its row (LayoutText, wstr::Copy).
 //
@@ -317,7 +319,8 @@ extern "C" void OpucFishing_TextureLoadById(CpuContext* ctx) {
     const uint32_t id = ctx->gpr[3];
     if (const PcArtPic* art = RuntimeConfigFile::PcButtonArt(true) ? FindArt(id) : nullptr) {
         const CpuContext c = *ctx;
-        if (id >= 0xA00490 && id <= 0xA00495) {  // the ALTX check bubbles: the game's texture, a new image
+        // The ALTX atlases (the check bubbles, the title's "PRESS (A)" font_Abutton@1): the game's texture, a new image.
+        if ((id >= 0xA00490 && id <= 0xA00495) || id == 0xA10040) {
             GuestFunctions::NextTranslation(kLoadById)(ctx);
             try { PatchAtlas(c, ctx->gpr[3], *art); } catch (...) {}
             return;

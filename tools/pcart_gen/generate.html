@@ -32,6 +32,9 @@ const PICS = {
   'En/ItemMenu.aar': [0xa002e2, 0xa002e3, 0xa002e4],
   'En/NextIsland.aar': [0xa00341, 0xa00342],
   'En/PictBook.aar': [0xa00373, 0xa00377],
+  'En/Title/TitleTop.aar': [0xa10040],
+  'En/Title/TitleMenu.aar': [0xa1000e],
+  'En/MissionWindow.aar': [0xa000c0, 0xa000c1, 0xa000c2],
 };
 
 const fetchBytes = async p => { const r = await fetch(`/files/${p}`); if (!r.ok) throw new Error(`${p}: ${r.status}`); return new Uint8Array(await r.arrayBuffer()); };

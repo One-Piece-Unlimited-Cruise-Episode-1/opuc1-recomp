@@ -6,7 +6,7 @@ The hand-off between sessions. Read this first; update it last. One iteration of
 <!-- metrics:begin (tools/status.mjs) -->
 ```json
 {
-  "measured": "2026-11-27T23:29:45.696Z",
+  "measured": "2026-11-28T19:42:42.884Z",
   "mapStarts": 18670,
   "mapNamed": 6337,
   "mapSdkNamed": 1097,
@@ -16,7 +16,7 @@ The hand-off between sessions. Read this first; update it last. One iteration of
   "translatedFunctions": 18850,
   "translateOk": true,
   "compileErrors": 0,
-  "compileLastLine": "[2/3] Linking CXX executable opuc1-recomp.exe",
+  "compileLastLine": "[6/7] Linking CXX executable opuc1-recomp.exe",
   "executables": [
     "opuc1-recomp.exe"
   ],
@@ -189,11 +189,25 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   zooms straight back out (p14_run.log). Before 2026-11-28, past about 35 deg under, the
   floor / occlusion re-polarise flipped the eye over Luffy (pitch 0x1945 -> 0xE2ED, the "snap to bird's-eye"; vault
   adventure-camera). Checked by script on the Sunny deck (build/logs/p12_run.log, p12_png/): 29.7 deg at dist 1.61,
-  orbit and idle stay; the first version left the zoom-out to the game's easing (3.9 in ~2.5 s, 4.0 in ~5 s). Off while a pickaxe / net is in the hand
+  orbit and idle stay; the first version left the zoom-out to the game's easing (3.9 in ~2.5 s, 4.0 in ~5 s).
+  Fixed 2026-11-28 (the close / overhead camera after a save load): after a load the game holds pitch 0x71C7 (160 deg,
+  past the vertical) for a frame; the zoom engaged on it with no mouse input and froze the camera at distance 2.34, and
+  the mouse step clamped such a pitch to 90 deg. The zoom now engages only while the mouse turns the camera (hold) and
+  drops on a new camera manager; a pitch past the vertical is rewritten as the same eye (180 deg - p, yaw + 180 deg)
+  before the mouse step. `OPUC_TRACE_CAMERA=1` logs pitch / yaw / distance / zoom twice a second. Off while a pickaxe / net is in the hand
   or the rod is out (the mouse drives the remote there). `OPUC_MOUSE_CAPTURE=0` never captures (scripted runs keep the
   desktop mouse; MDX / MDY still turn the camera). Checked by script in Fst (yaw / pitch move and hold, nothing in
   the pause or with the pickaxe held) and one focused run (captured on the field, released at the pause). Not checked
   by hand: feel and sensitivity, the first-person (Subject) path, lock-on.
+- Wii Remote speaker sounds (2026-11-28, `hle/opuc/sound_opuc.cpp`): 18 sounds flagged 0x08 in `sound/snd_all.atb`
+  (pickaxe spark on rock / hard ground 0xFEA, multi-dig 0xFE0, the fishing swing / cast / hook / reel, the camp save's
+  "Saving in progress" loop 0x1561 and "Save complete" 0x1562, ...) start only while the remote-0 speaker ready byte
+  0x8068A5E0 is set; without it `Se::SpawnVoice` returns -2 and nothing plays, TV included (vault boot-flow, Sound).
+  The byte is set by nw4r RemoteSpeaker reaching PLAY, which never happens without a remote. A wrapper on
+  `SoundSe::Update` 801a930c now sets it each frame (`OPUC_REMOTE_SPEAKER_READY=0` turns it off); the sounds play on
+  the TV's main line (their 0x10 flag). `OPUC_TRACE_SE=1` logs each sound start (id, +remote, caller, slot or -2),
+  `OPUC_TRACE_AX=1` each AX voice start with its main / remote mix. Checked: a camp save starts 0xA0001561 and
+  0x20001562 with AX voices; the user confirmed in game (2026-11-28) the save sounds and the pickaxe hits on a rock.
 - Camp menu right button (2026-11-28): the scheme's "ui" test missed the Sunny's camp menu (CharaManager is in MEM2,
   0x9142A240; the pointer check accepted only MEM1), so RMB was a shake there. `GameUi` now accepts MEM2 and counts
   CharaManager +0x30C ≠ 0 as a menu. Checked by script: hub → Storage → RMB → hub → RMB → deck. Not checked: Sunny
@@ -206,7 +220,10 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   target: a new native there needs `-Stage translate`). A/B by script on the Sunny deck, 200 s: badge at t ≈ 87 s
   without the override, none with it (build/logs/battery-ab/). Not checked: the HOME Menu's battery bars.
 - PC button art (2026-11-26, ported from the Play tab's play/ui/pcart.js; not in the game; `[game] pc_button_art`,
-  F10 > Game): the 48 pictures that show a Wii Remote / Nunchuk button (tutorial reminders 0xA00050–56 and the
+  F10 > Game; 2026-11-28 +5: the title's PRESS (A) 0xA10040 (ALTX, patched like the check bubbles), the record book's
+  C 0xA1000E beside a cleared record (C restarts it with a difficulty choice), the Gaburi / Franky mission window's
+  "(A) Activated!!" / "(A) Can't Use" bars 0xA000C0-C2; seen on screen: PRESS [E] and the Shift key in the record book
+  of the installed NAND; the mission bars confirmed in game by the user): the 48 pictures that show a Wii Remote / Nunchuk button (tutorial reminders 0xA00050–56 and the
   `[icon:k]` pictures, the window A prompt 0xA00000 / 01, the check bubbles 0xA00490 / 93 / 94 / 95, the PauseMenu,
   StatusDetail, MakeItemTree, BaseMenu, CostumeChange, DataBase, EndMakeItem, ItemMenu, NextIsland and PictBook help
   strips and small buttons) are drawn again with the bound key. `tools/pcart_gen` (`node tools/pcart_gen/serve.mjs`,
@@ -299,9 +316,15 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   alpha), coloured through the ALTextGC font colour (ON yellow, OFF grey). Rows:
   - Debug: the game DebugFlag names no_enemy, menu_content_all_open, event_test, showhit, debug_breakrush,
     debug_breakrush_none, answered by the existing `DebugFlag::IsEnabled` wrapper (by string, the game keeps several
-    copies of some names); Freeze enemies (EnemyManager +0xE held at 1, what EnemyStop(true) writes); Invincible
-    (`PlayStatus::SetCurrent` 804d8da0 wrapped: a lower value for the leader's HP is refused); Infinite SP (leader SP
-    current kept at its max each frame, from KPADRead); Wii button art (`[game] pc_button_art` off); State text (an
+    copies of some names); Freeze enemies (EnemyManager +0xE held at 1, what EnemyStop(true) writes); Infinite HP /
+    Infinite SP (2026-11-28; before: "Invincible" on SetCurrent and a per-frame SP refill, which let AddMax take the SP
+    max down on every C+A / C+shake): `PlayStatus::ApplyValue` 804d8bb8, the one writer of every HP / SP current and
+    max value, is wrapped (a lower request for the leader's gauge becomes the old value, a clamped result is put back),
+    and `PlayStatus::SetMax` 804d8a84 (the HP gauge's direct max store) refuses a lower HP max. `OPUC_TEST_INFINITE=hp,sp`
+    switches them on at start, `OPUC_TEST_STATUS_HIT=<frames>` applies AddCurrent / SetMax / AddMax once on the field,
+    `OPUC_TRACE_HP=1` logs every lowering. Checked (Sunny deck): dodge 100 -> 60, dash -2 per tick and the test hits
+    refused (HP 170/170, SP 100/100); off, the same left HP 140/85 and SP 10/50. Not checked: an enemy hit, a C+A
+    (not learned on the test save); Wii button art (`[game] pc_button_art` off); State text (an
     ImGui corner readout: move state, HP, SP, position); Enemy AI view (a sub-list, see the Enemy AI view entry).
   - Flags: the bank-1 records found by walking the bank (`*(0x805E8B04)`, nodes {next, name, size, data}):
     EventFlag, EventScriptEndFlag, EventFuncEnableFlag, EventFuncEndFlag (set ids plus the ones seen this session),

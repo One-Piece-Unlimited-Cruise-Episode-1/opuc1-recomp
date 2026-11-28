@@ -693,6 +693,7 @@ struct MouseCam {
     double fracYaw = 0, fracPitch = 0;         // sub-BAM remainders
     std::atomic<bool> zoomOk{false};           // ground zoom allowed (field, mouse camera on, mouse not on a tool)
     bool zoomed = false;                       // the ground zoom owns the distance (set in, follows the pitch out)
+    uint32_t zoomMgr = 0;                      // the camera manager the zoom engaged on (a new one drops it)
     bool scriptSeen = false;                   // a scripted MDX / MDY ran (tests have no capture)
     uint64_t lastLog = 0;
 } mcam;
@@ -777,13 +778,19 @@ int32_t SoloLowLimit(uint32_t row) {
 
 // Sets the follow camera's distance while it looks up from below the horizon; returns the distance written (0 =
 // untouched). target = the distance the game is easing toward (UpdateRotation's f1).
+// Engages only while the mouse is turning the camera (hold > 0): the game puts the eye under the horizon by itself
+// (slopes, and after a save load the Sunny deck read pitch 0x71C7 with nothing pressed), and a zoom that engaged on such
+// a pitch never released and left the camera close to the player for good (2026-11-28).
 float GroundZoom(uint32_t mgr, uint32_t row, float target) {
     if (!mgr || !mcam.zoomOk.load()) { mcam.zoomed = false; return 0; }
+    if (mgr != mcam.zoomMgr) { mcam.zoomed = false; mcam.zoomMgr = mgr; }
     const float cur = ReadF32(mgr + 0x238);
     if (!std::isfinite(cur) || cur <= 0.0f) { mcam.zoomed = false; return 0; }
     if (!std::isfinite(target) || target <= 0.0f || target > 50.0f) target = std::max(cur, 4.5f);
     const int32_t v = static_cast<int32_t>(Memory::Read32(mgr + 0x230) & 0xFFFFu);
-    const int32_t s = v <= 0x8000 ? v : v - 0x10000;
+    int32_t s = v <= 0x8000 ? v : v - 0x10000;
+    if (s > 0x4000) s = 0x8000 - s;     // past the vertical: the same elevation seen from the other side
+    if (s < -0x4000) s = -0x8000 - s;
     double safe = 1e9;   // floor-safe distance at this pitch (unbounded at or above the horizon)
     if (s > 0) {
         const double a = s / kBamPerRad;
@@ -796,7 +803,7 @@ float GroundZoom(uint32_t mgr, uint32_t row, float target) {
         if (d != cur) WriteF32(mgr + 0x238, d);
         return d;
     }
-    if (safe >= cur) return 0;
+    if (safe >= cur || mcam.hold.load() <= 0) return 0;
     mcam.zoomed = true;
     const float d = static_cast<float>(safe);
     WriteF32(mgr + 0x238, d);
@@ -823,7 +830,18 @@ uint32_t ApplyMouseCamera(uint32_t rowPtrField, const char* what, bool solo) {
     if (dy == 0 && dp == 0) return mgr;
     const uint32_t row = Memory::Read32(rowPtrField);
     const int32_t limit = ToolPtr(row) ? static_cast<int32_t>(Memory::Read32(row + 0x28)) : 0x3C71;
-    const uint32_t yaw0 = Memory::Read32(mgr + 0x234), pitch0 = Memory::Read32(mgr + 0x230);
+    uint32_t yaw0 = Memory::Read32(mgr + 0x234), pitch0 = Memory::Read32(mgr + 0x230);
+    // A pitch past the vertical (the game left 0x71C7 = 160 deg after a save load on the Sunny deck, 2026-11-28) is
+    // first rewritten as the same eye position: elevation 180 deg - p seen from yaw + 180 deg. StepPitch's +-90 deg
+    // clamp otherwise turned the first mouse step into a straight overhead (or underneath) view.
+    {
+        const int32_t v = static_cast<int32_t>(pitch0 & 0xFFFFu);
+        const int32_t sp = v <= 0x8000 ? v : v - 0x10000;
+        if (sp > 0x4000 || sp < -0x4000) {
+            pitch0 = static_cast<uint32_t>((sp > 0 ? 0x8000 : -0x8000) - sp) & 0xFFFFu;
+            yaw0 = (yaw0 + 0x8000u) & 0xFFFFu;
+        }
+    }
     const uint32_t yaw = (yaw0 + static_cast<uint32_t>(dy)) & 0xFFFFu;
     const int32_t up = limit > 0 && limit < 0x4000 ? limit : 0x3C71;
     const uint32_t pitch = StepPitch(pitch0, dp, up, solo ? std::min(up, SoloLowLimit(row)) : up);
@@ -859,6 +877,7 @@ extern "C" void OpucMouseCam_SoloUpdateRotation(CpuContext* ctx) {
         }
     } catch (...) { held = false; }
     GuestFunctions::NextTranslation(0x804BCFC0)(ctx);
+    OpucDev::TestFieldFrame(*ctx);
     if (held) {
         // Update reads |vel| after the call (the rail branch): give it the real velocity back.
         try { Memory::Write32(vel, vx); Memory::Write32(vel + 8, vz); } catch (...) {}
@@ -866,6 +885,12 @@ extern "C" void OpucMouseCam_SoloUpdateRotation(CpuContext* ctx) {
     // After the game's rotation and distance step, before Update places the eye (PolarToPos).
     try {
         const float d = GroundZoom(mgr, Memory::Read32(soloRowField), targetDist);
+        static const bool traceCam = std::getenv("OPUC_TRACE_CAMERA") != nullptr;
+        if (traceCam && mgr && kb.frame % 30 == 0)
+            RT_LOG(RT_TAG_HLE) << "[opuc] camera solo: pitch 0x" << std::hex << (Memory::Read32(mgr + 0x230) & 0xFFFFu)
+                               << " yaw 0x" << (Memory::Read32(mgr + 0x234) & 0xFFFFu) << std::dec << " dist "
+                               << ReadF32(mgr + 0x238) << " target " << targetDist << " zoomOk " << mcam.zoomOk.load()
+                               << " zoomed " << mcam.zoomed << " hold " << mcam.hold.load() << std::endl;
         if (d > 0 && g.trace && kb.frame % 15 == 0)
             RT_LOG(RT_TAG_HLE) << "[opuc] mouse camera ground zoom: pitch 0x" << std::hex
                                << (Memory::Read32(mgr + 0x230) & 0xFFFFu) << std::dec << " dist " << d << " target "

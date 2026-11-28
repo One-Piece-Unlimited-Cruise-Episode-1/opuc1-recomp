@@ -28,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace AxDspHle {
 namespace {
@@ -654,7 +655,31 @@ private:
         }
     }
 
+    // OPUC_TRACE_AX=1: one line per voice start (a PB that runs with a new start address): its main / remote mix,
+    // so a sound that reaches only the Wii Remote speaker shows as "remote only".
+    void TraceVoiceStart(uint32_t pbAddr, const AXPBWii& pb) {
+        static const bool trace = std::getenv("OPUC_TRACE_AX") != nullptr;
+        if (!trace) return;
+        const uint32_t start = Hilo(pb.audio_addr.loop_addr_hi, pb.audio_addr.loop_addr_lo);
+        auto& seen = m_traceVoices[pbAddr];
+        const bool running = pb.running == 1;
+        const bool absent = seen.frame + 2 < m_traceFrame;  // left the PB list since (the list holds only live voices)
+        seen.frame = m_traceFrame;
+        if (running && (absent || !seen.running || seen.loop != start)) {
+            const uint32_t control = Hilo(pb.mixer_control_hi, pb.mixer_control_lo);
+            const bool main = (control & 0x3) != 0 && (pb.mixer.main_left.volume | pb.mixer.main_right.volume) != 0;
+            const bool remote = pb.remote && (pb.remote_mixer_control & 3u) != 0 && pb.remote_mixer.main0.volume != 0;
+            RT_LOGF(RT_TAG_AUDIO, "[ax] voice start pb %08X data %08X fmt %u loop %u main %04X/%04X ctl %08X remote %u rctl %04X r0 %04X%s\n",
+                    pbAddr, start, pb.audio_addr.sample_format, pb.audio_addr.looping, pb.mixer.main_left.volume,
+                    pb.mixer.main_right.volume, control, pb.remote, pb.remote_mixer_control, pb.remote_mixer.main0.volume,
+                    remote && !main ? " remote only" : remote ? " tv+remote" : "");
+        }
+        seen.running = running;
+        seen.loop = start;
+    }
+
     void ProcessPBList(uint32_t pbAddr, bool newFilter, bool oldAxLayout) {
+        ++m_traceFrame;
         uint32_t guard = 0;
         while (pbAddr && guard++ < 256) {
             AXPBWii pb{};
@@ -671,6 +696,7 @@ private:
             } else {
                 ProcessVoice(pb, buffers, kAxSamplesPerFrame, control, BaseCoefficients(), newFilter);
             }
+            TraceVoiceStart(pbAddr, pb);
             WritePB(pbAddr, pb);
             pbAddr = Hilo(pb.next_pb_hi, pb.next_pb_lo);
         }
@@ -1423,6 +1449,13 @@ private:
     // are 18 samples per frame rather than 96.
     std::array<std::array<int, kAxSamplesPerFrame>, kAxRegularBusCount> m_bus{};
     std::array<std::array<int, kAxWiimoteSamplesPerFrame>, kAxWiimoteBusCount> m_wmBus{};
+    struct TraceVoice {
+        bool running = false;
+        uint32_t loop = 0;
+        uint64_t frame = 0;
+    };
+    uint64_t m_traceFrame = 2;
+    std::unordered_map<uint32_t, TraceVoice> m_traceVoices;
     uint16_t m_lastMainVolume = 0x8000;
     std::array<uint16_t, 3> m_lastAuxVolumes{};
 
