@@ -1232,9 +1232,35 @@ void TestWarp(const CpuContext& c) {
     RT_LOG(RT_TAG_HLE) << "[opuc] test warp to " << v[0] << ", " << v[1] << ", " << v[2] << " yaw " << v[3] << std::endl;
 }
 
+// Test helper, OPUC_TEST_SUNNY=1: after the first pause closes, board the Thousand Sunny the way A at Fst's camp point
+// does (CharaManager::UpdateCampPointCheck 80042314): EventManager::AddEventFileById(*(0x8068A1FC), 11990, 0, island,
+// 1, 0, 0, 0) (8009f018). It only queues the script (EventManager::AddEventFile 8009eb10 does not yield); event 11990
+// runs the boarding (FieldChange(19614), CampIn, the Sunny BGM) on the event coroutine. Queued from the next
+// UpdateCampPointCheck call, under that function's own gate (CharaManager +0x78 & 0x180 clear, EventManager u8 +0x40
+// clear), not from inside the pause record's teardown.
+bool g_sunnyPending = false;
+
+extern "C" void OpucDev_UpdateCampPointCheck(CpuContext* ctx) {
+    const CpuContext c = *ctx;
+    GuestFunctions::NextTranslation(0x80042314)(ctx);
+    if (!g_sunnyPending) return;
+    const uint32_t cm = Memory::Read32(kCharaManagerPtr), em = Memory::Read32(0x8068A1FCu);
+    static int logged = 0;
+    if (logged++ % 120 == 0)
+        RT_LOG(RT_TAG_HLE) << "[opuc] test sunny: cm+0x78=0x" << std::hex << (cm ? Memory::Read32(cm + 0x78) : 0)
+                           << " em+0x40=" << (em ? Memory::Read8(em + 0x40) : 0) << std::dec << std::endl;
+    if (!cm || !em || (Memory::Read32(cm + 0x78) & 0x180) || Memory::Read8(em + 0x40)) return;
+    g_sunnyPending = false;
+    Call(c, 0x8009F018, {em, 11990, 0, 1 /* Fst */, 1, 0, 0, 0});
+    RT_LOG(RT_TAG_HLE) << "[opuc] test: queued event 11990 (board the Sunny)" << std::endl;
+}
+REGISTER_NATIVE_WRAPPER_AS(0x80042314, OpucDev_UpdateCampPointCheck, "OpucDev_UpdateCampPointCheck");
+
 extern "C" void OpucDev_OnPauseMenuClosed(CpuContext* ctx) {
     const CpuContext c = *ctx;
     GuestFunctions::NextTranslation(kOnPauseMenuClosed)(ctx);
+    static bool sunnyOnce = false;
+    if (!sunnyOnce && std::getenv("OPUC_TEST_SUNNY")) { sunnyOnce = true; g_sunnyPending = true; }
     TestWarp(c);
     if (g_pending.empty()) return;
     const std::vector<PendingGrant> grants = std::move(g_pending);

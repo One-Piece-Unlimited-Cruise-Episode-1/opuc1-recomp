@@ -46,6 +46,7 @@ extern "C" void PAD_HLE_SetRumbleEnabled(bool enabled);
 #include <aurora/gfx.h>
 
 void OpucDev_DrawOverlays();  // hle/opuc/dev_pages.cpp: the Dev State text and Remote graph
+void OpucInput_UpdateMouseCapture();  // hle/opuc/wiimote_opuc.cpp: relative mouse mode on the field (mouse camera)
 
 extern "C" int g_gxFrameCount;
 
@@ -885,6 +886,21 @@ void DrawTopBar() {
         if (ImGui::Checkbox("PC button art (tutorials, prompts, menu help)", &pcArt)) {
             RuntimeConfigFile::SetPcButtonArt(pcArt);
         }
+        ImGui::Separator();
+        bool mouseCam = RuntimeConfigFile::MouseCamera(true);
+        if (ImGui::Checkbox("Mouse camera (the mouse turns the field camera)", &mouseCam)) {
+            RuntimeConfigFile::SetMouseCamera(mouseCam);
+        }
+        float mouseSens = RuntimeConfigFile::MouseCameraSensitivity(1.0f);
+        if (ImGui::SliderFloat("Mouse camera sensitivity", &mouseSens, 0.1f, 4.0f, "%.2f")) {
+            RuntimeConfigFile::SetMouseCameraSensitivity(mouseSens);
+        }
+        bool mouseInvert = RuntimeConfigFile::MouseCameraInvertY(false);
+        if (ImGui::Checkbox("Invert the mouse camera's vertical", &mouseInvert)) {
+            RuntimeConfigFile::SetMouseCameraInvertY(mouseInvert);
+        }
+        ImGui::TextDisabled("Captured on the field, freed in menus (hold Alt to free it). A pickaxe or net in the hand\n"
+                            "and the fishing rod keep the game's camera: there the mouse swings the tool.");
         ImGui::TextDisabled("Pictures already loaded keep their art until the game loads them again.");
         ImGui::EndMenu();
     }
@@ -1054,6 +1070,7 @@ void Draw() noexcept {
     DrawFpsOverlay();
     OpucDev_DrawOverlays();
     DrawTopBar();
+    OpucInput_UpdateMouseCapture();
     DrawExitPrompt();
     DrawRestartPrompt();
     controller_mapping_wizard::Draw();

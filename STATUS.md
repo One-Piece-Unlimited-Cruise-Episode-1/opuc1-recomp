@@ -43,7 +43,7 @@ The hand-off between sessions. Read this first; update it last. One iteration of
 | M4 | Disc reads from `data/extract/DATA`, AAR packs load | `[opuc] dvd read` lines | done 2026-11-22: HomeButton2, resource/En, Menu, event/chara packs, sound archives, startlogo (order on vault boot-flow) |
 | M4b | Disc reads straight from `data/opuc1.iso` (user requirement) | run with `paths.disc_image` and no extracted tree | open |
 | M5 | Strap and logo screens look like Dolphin's | screenshot vs `programs/DolphinHarness` capture | in progress: strap screen looks right by eye; no side-by-side with Dolphin yet |
-| M6 | Input: virtual Wii Remote + Nunchuk (KPAD) from keyboard/gamepad | scripted A passes the strap screen | done 2026-11-22: keyboard + mouse use the Play app's control scheme (dodge/dash/skill macros, held-shake swing, menu "ui" switch), gamepad, `OPUC_INPUT_SCRIPT`; no IR pointer, no mouse look: `hle/opuc/wiimote_opuc.cpp` |
+| M6 | Input: virtual Wii Remote + Nunchuk (KPAD) from keyboard/gamepad | scripted A passes the strap screen | done 2026-11-22: keyboard + mouse use the Play app's control scheme (dodge/dash/skill macros, held-shake swing, menu "ui" switch), gamepad, `OPUC_INPUT_SCRIPT`; no IR pointer; mouse camera since 2026-11-28: `hle/opuc/wiimote_opuc.cpp` |
 | M7 | Title menu, NAND save create/load | save written under the NAND root, reloads | in progress: on an empty NAND the boot save step creates banner.bin + share/system.bin + user00-02.bin (2026-11-22); the title (logo, PRESS A) and the Record book menu render like Dolphin; Record 1 → Start Game reaches state 0xe → 3 (2026-11-22); loading an existing save not tested yet |
 | M8 | Audio: AX/AXFX mixing, nw4r snd, BGM streams | strap BGM audible, no underruns in log | open |
 | M9 | Adventure field (Fst) loads, player moves, camera follows | harness scenario parity | in progress: AdventureMain runs `st_newgame`, loads Fst and plays the opening movie (THP + captions, skippable with +) and the opening event; Luffy gets control in Fst and runs / dashes with the HUD up (keyboard scheme, 2026-11-22); camera, combat and parity not checked |
@@ -166,6 +166,38 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
     runtime otherwise stops with "Stale generated indirect dispatch winner").
   - Test helpers (dev_menu.cpp, at the first pause close with `OPUC_TEST_WARP`): `OPUC_TEST_ROD=1` the max rod,
     `OPUC_TEST_GIVE="1,3:1"` items silently (`id:extra0` through an ItemRef; 3:1 = the Bug-Catcher Net).
+    `OPUC_TEST_SUNNY=1` (2026-11-28): after the first pause close, queue event 11990 (board the Sunny, as A at Fst's
+    camp point) from the next `CharaManager::UpdateCampPointCheck` 80042314 under its gate (EventManager **u8** +0x40).
+    The first boarding plays scene 10070 (talk windows): tap E every 2 s from S3@49 to S3@155; the deck is free by
+    S3@170 and Esc opens the camp hub. A camp test that presses A on the hub's first row (Save) can write slot 0. A
+    save writes `share/system.bin` (slot summary) and `share/user00.bin` together, so back up and restore the two as
+    a pair. On 2026-11-28 only user00.bin was put back (to the 0xAA placeholder): system.bin still listed slot 0 as
+    chapter 2, the title loaded the placeholder, and the game stopped in `ItemBagSet::ReadHistory` (vault save-data,
+    "Summary used, slot file still a placeholder"). Slot 0 is now the Sunny-deck save again (=
+    `build/native/UserData/sunny_deck_user00.bin`, matching system.bin), so A on the title record book loads it.
+    New-game recipes now need a free slot: delete slot 0 in the record book, or start them from a slot that is empty.
+- Mouse camera (2026-11-28, the Play tab's mouse look; not in the game; `[game] mouse_camera`,
+  `mouse_camera_sensitivity`, `mouse_camera_invert_y`, F10 > Game). On the field the mouse is captured (SDL relative
+  mode, `OpucInput_UpdateMouseCapture` from `settings_overlay::Draw`); menus, the overlay and Alt held free it. The
+  delta goes into GWCameraManager yaw +0x234 / pitch +0x230 in wrappers on `GWCameraSolo::UpdateRotation` 804bcfc0
+  and `GWCameraSubject::Update` 804be8c4 (mask / clamp done there: the game clamps only on a non-zero rate); 1.5 s
+  after a movement flag 0x2000 and a zero velocity hold the automatic swing. Pitch is an orbit-camera clamp in
+  signed space: 85 deg above (the row limit). Under the horizon the follow camera zooms in instead of sinking into
+  the floor (`GroundZoom`, after UpdateRotation: the f32 distance mgr+0x238 is capped so the eye stays 0.6 over the
+  floor and at least 1.4 out horizontally), which allows atan2(offY - 0.6, 1.4), at most 30 deg (`SoloLowLimit`).
+  Once engaged it sets dist = min(UpdateRotation f1 target, floor-safe distance) each frame, so raising the camera
+  zooms straight back out (p14_run.log). Before 2026-11-28, past about 35 deg under, the
+  floor / occlusion re-polarise flipped the eye over Luffy (pitch 0x1945 -> 0xE2ED, the "snap to bird's-eye"; vault
+  adventure-camera). Checked by script on the Sunny deck (build/logs/p12_run.log, p12_png/): 29.7 deg at dist 1.61,
+  orbit and idle stay; the first version left the zoom-out to the game's easing (3.9 in ~2.5 s, 4.0 in ~5 s). Off while a pickaxe / net is in the hand
+  or the rod is out (the mouse drives the remote there). `OPUC_MOUSE_CAPTURE=0` never captures (scripted runs keep the
+  desktop mouse; MDX / MDY still turn the camera). Checked by script in Fst (yaw / pitch move and hold, nothing in
+  the pause or with the pickaxe held) and one focused run (captured on the field, released at the pause). Not checked
+  by hand: feel and sensitivity, the first-person (Subject) path, lock-on.
+- Camp menu right button (2026-11-28): the scheme's "ui" test missed the Sunny's camp menu (CharaManager is in MEM2,
+  0x9142A240; the pointer check accepted only MEM1), so RMB was a shake there. `GameUi` now accepts MEM2 and counts
+  CharaManager +0x30C ≠ 0 as a menu. Checked by script: hub → Storage → RMB → hub → RMB → deck. Not checked: Sunny
+  room-object pages (Kitchen, Fish Tank...) one by one; they open through the same +0x30C.
 - PC button art (2026-11-26, ported from the Play tab's play/ui/pcart.js; not in the game; `[game] pc_button_art`,
   F10 > Game): the 48 pictures that show a Wii Remote / Nunchuk button (tutorial reminders 0xA00050–56 and the
   `[icon:k]` pictures, the window A prompt 0xA00000 / 01, the check bubbles 0xA00490 / 93 / 94 / 95, the PauseMenu,

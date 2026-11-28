@@ -92,6 +92,11 @@ struct RuntimeUserConfig {
     // PC button art (hle/opuc/pc_pictures.cpp; the Play tab's pcart.js): tutorial, prompt and menu help pictures
     // with the bound keys instead of Wii Remote buttons.
     std::optional<bool> pcButtonArt;
+    // Mouse camera (hle/opuc/wiimote_opuc.cpp; the Play tab's mouse look, not in the game): the mouse is captured on
+    // the field and turns the follow camera; sensitivity scales 0.0025 rad per pixel, invert flips the vertical.
+    std::optional<bool> mouseCamera;
+    std::optional<float> mouseCameraSensitivity;
+    std::optional<bool> mouseCameraInvertY;
 };
 
 namespace RuntimeConfigFile {
@@ -322,7 +327,13 @@ inline void EnsureConfigFile() {
               "# PlayGuide pictures with keyboard / mouse glyphs instead of the Wii Remote.\n"
               "fishing_pc_guide = true\n"
               "# Tutorial, prompt and menu help pictures with the bound keys instead of Wii Remote buttons.\n"
-              "pc_button_art = true\n\n"
+              "pc_button_art = true\n"
+              "# Mouse camera (not in the game): the mouse is captured on the field and turns the camera;\n"
+              "# the game's own camera while a pickaxe or net is in the hand or the rod is out.\n"
+              "# Hold Alt to free the cursor.\n"
+              "mouse_camera = true\n"
+              "mouse_camera_sensitivity = 1.0\n"
+              "mouse_camera_invert_y = false\n\n"
               "[discord]\n"
               "# Rich Presence talks only to a locally-running Discord client.\n"
               "# Off until client_id is set: put a Discord application ID there\n"
@@ -456,6 +467,9 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.fishingAssist = FindConfigValue<bool>(document, "game", "fishing_assist");
     config.fishingPcGuide = FindConfigValue<bool>(document, "game", "fishing_pc_guide");
     config.pcButtonArt = FindConfigValue<bool>(document, "game", "pc_button_art");
+    config.mouseCamera = FindConfigValue<bool>(document, "game", "mouse_camera");
+    config.mouseCameraSensitivity = FindConfigFloat(document, "game", "mouse_camera_sensitivity");
+    config.mouseCameraInvertY = FindConfigValue<bool>(document, "game", "mouse_camera_invert_y");
     config.textureReplacements = FindConfigValue<bool>(document, "video", "texture_replacements");
     config.textureDumps = FindConfigValue<bool>(document, "video", "texture_dumps");
 
@@ -938,6 +952,21 @@ inline bool PcButtonArt(bool fallback = true) { return Get().pcButtonArt.value_o
 inline bool SetPcButtonArt(bool value) {
     Mutable().pcButtonArt = value;
     return WriteSetting("game", "pc_button_art", value ? "true" : "false");
+}
+inline bool MouseCamera(bool fallback = true) { return Get().mouseCamera.value_or(fallback); }
+inline bool SetMouseCamera(bool value) {
+    Mutable().mouseCamera = value;
+    return WriteSetting("game", "mouse_camera", value ? "true" : "false");
+}
+inline float MouseCameraSensitivity(float fallback = 1.0f) { return Get().mouseCameraSensitivity.value_or(fallback); }
+inline bool SetMouseCameraSensitivity(float value) {
+    Mutable().mouseCameraSensitivity = value;
+    return WriteSetting("game", "mouse_camera_sensitivity", std::to_string(value));
+}
+inline bool MouseCameraInvertY(bool fallback = false) { return Get().mouseCameraInvertY.value_or(fallback); }
+inline bool SetMouseCameraInvertY(bool value) {
+    Mutable().mouseCameraInvertY = value;
+    return WriteSetting("game", "mouse_camera_invert_y", value ? "true" : "false");
 }
 inline bool FishingPcGuide(bool fallback = true) { return Get().fishingPcGuide.value_or(fallback); }
 inline bool SetFishingPcGuide(bool value) {
