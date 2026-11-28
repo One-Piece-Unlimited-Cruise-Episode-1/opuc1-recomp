@@ -231,6 +231,18 @@ try {
         $dependencies = Join-Path $Workspace 'Dependencies'
         $nativePrebuilt = Resolve-OpucNativePrebuiltDirectory $dependencies $toolchainBin `
             $aurora (Join-Path $Workspace 'runtime\third_party')
+        # A release installation ships the dependency headers only (PayloadPruning.ps1 leaves a
+        # SOURCES-OMITTED.txt in each tree), so it has nothing to build aurora from: a package it
+        # rejects means the installation itself is damaged (the release gate in Build-Installer.ps1
+        # refuses a package an intact installation would reject). Running the same setup again reuses
+        # the recorded toolkit, so only a fresh installation restores the files.
+        $sourcesOmitted = @(Get-ChildItem -LiteralPath $dependencies -Directory |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'SOURCES-OMITTED.txt') }).Count -gt 0
+        if (-not $nativePrebuilt -and $sourcesOmitted) {
+            throw ('The precompiled aurora package of this installation was rejected (see the reason above), and ' +
+                'the installation carries no dependency sources to build it from, so its files are damaged. ' +
+                'Uninstall it and install it again with the setup.')
+        }
         if ($X86CpuProfile -eq 'v2') {
             Write-Host 'OPUCBUILD: This CPU does not support x86-64-v3; building for x86-64-v2'
         }

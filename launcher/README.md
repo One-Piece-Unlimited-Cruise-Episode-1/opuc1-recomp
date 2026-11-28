@@ -75,7 +75,15 @@ The first run downloads the pinned portable toolchain (`Prepare-PortableTools.ps
 (`Prepare-NativePrebuilt.ps1`), publishes the setup host and the translator, stages the payload, runs the boundary
 and dependency audits and writes `launcher/dist/opuc1-recomp-setup.exe`. The setup host and the translator are Native AOT
 executables; the payload leaves out the parts of the toolchain the build never uses (`PayloadPruning.ps1`) and carries
-no second copy of the host. Linux: `bash launcher/build-appimage.sh` (also needs `clang` and `zlib1g-dev` for Native AOT).
+no second copy of the host. Dependencies ship as headers and license files only: every installation links the
+precompiled package, so it never compiles a dependency (a damaged package stops the build and asks for a reinstall
+instead of trying a from-source build). The MinGW headers and libraries are cut down to what a game build reads:
+`Test-PayloadBuild.ps1` builds the product from the staged payload with a synthetic DOL for both CPU profiles,
+recording every toolkit file the configure checks, compiles and links read, and after the cut builds again as the
+release gate. It is packed by the host itself (`--pack-payload`) as xz-compressed tar parts with repeated
+files stored once, which needs `xz.exe` on the build machine (Git for Windows ships one; or pass `-XzPath`). The setup
+decodes xz on its own (`XzDecoderStream.cs`), so players need nothing installed, and the build ends by unpacking the
+finished exe and comparing it with the staged payload byte for byte (`--verify-payload`). Linux: `bash launcher/build-appimage.sh` (also needs `clang` and `zlib1g-dev` for Native AOT).
 macOS: `launcher/macos/build-setup-pkg.command` (see the script header for the inputs).
 
 `opuc1-recomp-setup.exe --self-test` runs the host's self-tests (no game data needed).

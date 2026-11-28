@@ -208,7 +208,10 @@ if [[ -n "$run_output" ]]; then
     copy_clean "$script_dir/opuc1-recomp-setup.command" "$run_extra/opuc1-recomp-setup"
     chmod +x "$run_extra/opuc1-recomp-setup"
     sed "s/@VERSION@/$version/" "$script_dir/setup-run-header.sh" > "$stage/setup.run"
-    COPYFILE_DISABLE=1 /usr/bin/tar -czf - -C "$resources" . -C "$run_extra" . >> "$stage/setup.run"
+    # xz at level 9: macOS's own /usr/bin/tar (libarchive + liblzma) writes it here and reads it back in
+    # setup-run-header.sh, so the user's machine needs nothing beyond the OS.
+    COPYFILE_DISABLE=1 /usr/bin/tar -cJ --options xz:compression-level=9 -f - \
+        -C "$resources" . -C "$run_extra" . >> "$stage/setup.run"
     chmod +x "$stage/setup.run"
     ditto "$stage/setup.run" "$run_output"
     printf 'Created self-extracting setup: %s\n' "$run_output"

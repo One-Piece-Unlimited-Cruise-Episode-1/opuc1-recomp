@@ -105,7 +105,7 @@ download_verified() {
 }
 
 if [[ -x "$toolchain_dir/bin/clang" && -x "$toolchain_dir/bin/ninja" && -x "$toolchain_dir/bin/cmake" &&
-      "$(cat "$toolchain_dir/.prune-version" 2>/dev/null)" == 2 ]]; then
+      "$(cat "$toolchain_dir/.prune-version" 2>/dev/null)" == 3 ]]; then
     echo "prepare-portable-tools.sh: reusing existing toolchain at $toolchain_dir"
     exit 0
 fi
@@ -166,13 +166,24 @@ resource_dirs=("$src"/lib/clang/*/)
 resource_version=$(basename "${resource_dirs[0]}")
 mkdir -p "$work/lib/clang/$resource_version/lib/$target_triple"
 cp -a "$src/lib/clang/$resource_version/include" "$work/lib/clang/$resource_version/"
+# Builtin headers for targets and languages local-build.sh never compiles for: other CPU families'
+# intrinsics, GPU/offload, CUDA/HIP, OpenCL, and the sanitizer/XRay/profile interfaces whose runtimes
+# are not bundled. The host architecture's own headers stay (arm_* on aarch64, the x86 ones on x86_64).
+builtin_headers="$work/lib/clang/$resource_version/include"
+rm -rf "$builtin_headers"/{sanitizer,xray,fuzzer,profile,orc,ppc_wrappers,cuda_wrappers,openmp_wrappers,llvm_libc_wrappers,llvm_offload_wrappers,zos_wrappers}
+rm -f "$builtin_headers"/{riscv,hexagon,hvx_hexagon,sifive,andes,velintrin,lasx,lsx,larch,wasm,nvptx,amdgpu,s390,htm,opencl-c}*.h \
+    "$builtin_headers"/__clang_cuda_*.h "$builtin_headers"/__clang_hip_*.h \
+    "$builtin_headers"/{altivec,vecintrin,msa}.h
+if [[ $arch == x86_64 ]]; then
+    rm -f "$builtin_headers"/arm*.h
+fi
 for runtime in libclang_rt.builtins.a clang_rt.crtbegin.o clang_rt.crtend.o; do
     runtime_path="$src/lib/clang/$resource_version/lib/$target_triple/$runtime"
     if [[ -f "$runtime_path" ]]; then cp -a "$runtime_path" "$work/lib/clang/$resource_version/lib/$target_triple/"; fi
 done
 
 # Marks a toolchain directory staged with this pruning, so an older, fuller one is rebuilt.
-echo 2 > "$work/.prune-version"
+echo 3 > "$work/.prune-version"
 
 rm -rf "$extract_root"
 

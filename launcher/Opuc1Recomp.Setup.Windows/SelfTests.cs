@@ -33,6 +33,8 @@ internal static class SelfTests
         Test("Extracted game release validation", TestExtractedGameRelease, failures);
         Test("Payload timestamp normalization", TestPayloadTimestampNormalization, failures);
         Test("Installed setup copy from the host bytes", TestPayloadHostExtraction, failures);
+        Test("Payload packing round trip", TestPayloadPackRoundTrip, failures);
+        Test("xz decoder", TestXzDecoder, failures);
         Test("Workspace timestamp reconciliation", TestWorkspaceTimestampReconciliation, failures);
         Test("Toolkit accompanies the workspace", TestToolkitRefreshDecision, failures);
         Test("Host CPU requirement", TestHostCpuRequirement, failures);
@@ -268,22 +270,11 @@ internal static class SelfTests
         try
         {
             Directory.CreateDirectory(root);
+            var tree = Path.Combine(root, "tree");
+            WriteTestFile(tree, "licenses/x.txt", "x");
             var host = new byte[70_001];
             new Random(1).NextBytes(host);
-            using var zipBytes = new MemoryStream();
-            using (var zip = new System.IO.Compression.ZipArchive(zipBytes, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
-            using (var writer = new StreamWriter(zip.CreateEntry("licenses/x.txt").Open()))
-                writer.Write("x");
-            var setup = Path.Combine(root, "setup.exe");
-            using (var output = File.Create(setup))
-            {
-                output.Write(host);
-                zipBytes.Position = 0;
-                zipBytes.CopyTo(output);
-                output.Write(System.Text.Encoding.ASCII.GetBytes("OPUCPAY1"));
-                output.Write(BitConverter.GetBytes((long)host.Length));
-                output.Write(BitConverter.GetBytes(zipBytes.Length));
-            }
+            var setup = BuildTestSetup(root, tree, host);
 
             var extracted = Path.Combine(root, "installed", ProductInfo.SetupCopyName);
             using (var payload = PayloadArchive.Open(setup))
@@ -298,6 +289,147 @@ internal static class SelfTests
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
+
+    private static void WriteTestFile(string tree, string relative, string content)
+    {
+        var path = Path.Combine(tree, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+    }
+
+    /// <summary>A setup file laid out like a release (host, packed payload, footer), packed without an xz binary.</summary>
+    private static string BuildTestSetup(string root, string tree, byte[] host)
+    {
+        var payloadPath = Path.Combine(root, "payload.bin");
+        var reports = PayloadPacker.Pack(tree, payloadPath, Path.Combine(root, "parts"), PayloadPacker.WriteStoredXz);
+        _lastTestPackReports = reports;
+        var setup = Path.Combine(root, "setup.exe");
+        using (var output = File.Create(setup))
+        {
+            output.Write(host);
+            using (var payload = File.OpenRead(payloadPath)) payload.CopyTo(output);
+            output.Write(PayloadArchive.FooterMagic);
+            output.Write(BitConverter.GetBytes((long)host.Length));
+            output.Write(BitConverter.GetBytes(new FileInfo(payloadPath).Length));
+        }
+        return setup;
+    }
+
+    private static List<PayloadPacker.PartReport> _lastTestPackReports = [];
+
+    /// <summary>
+    /// A packed payload unpacks to exactly the staged tree, repeated files included: a copy of the head's runtime
+    /// DLL elsewhere in the toolkit and a repeated workspace file are stored once and come back as full files.
+    /// </summary>
+    private static void TestPayloadPackRoundTrip()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "opuc1-pack-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var tree = Path.Combine(root, "tree");
+            var manifest = System.Text.Json.JsonSerializer.Serialize(OpucManifest(), StateJsonContext.Default.PayloadManifest);
+            WriteTestFile(tree, InstalledLayout.PayloadManifestFileName, manifest);
+            WriteTestFile(tree, "licenses/LICENSE.txt", "license text");
+            WriteTestFile(tree, "Toolkit/nodtool.exe", "nodtool bytes");
+            WriteTestFile(tree, "Toolkit/Redist/vcruntime140.dll", "runtime dll");
+            WriteTestFile(tree, "Toolkit/CMake/bin/vcruntime140.dll", "runtime dll");
+            WriteTestFile(tree, "Toolkit/Ninja/vcruntime140.dll", "runtime dll");
+            WriteTestFile(tree, "Toolkit/llvm-mingw/bin/clang.exe", new string('c', 300_000));
+            WriteTestFile(tree, "Toolkit/empty.txt", "");
+            WriteTestFile(tree, "BuildWorkspace/runtime/src/a.cpp", "int a();");
+            WriteTestFile(tree, "BuildWorkspace/Dependencies/x/a.cpp", "int a();");
+            WriteTestFile(tree, "BuildWorkspace/Dependencies/x/runtime.dll", "runtime dll");
+            var setup = BuildTestSetup(root, tree, [1, 2, 3, 4]);
+
+            var links = _lastTestPackReports.Sum(part => part.Links);
+            // Toolkit: CMake and Ninja copies of the head's DLL. Workspace: the second a.cpp. The workspace DLL is not
+            // linked to the toolkit's: a link never crosses top-level directories.
+            if (links != 3) throw new Exception($"Expected 3 repeated files stored once, found {links}.");
+            if (_lastTestPackReports.Single(part => part.Name == PayloadPacker.HeadPart).Links != 0)
+                throw new Exception("The head part holds a link.");
+
+            var count = PayloadPacker.Verify(setup, tree, Path.Combine(root, "verify"));
+            if (count != 11) throw new Exception($"Verification compared {count} files, expected 11.");
+
+            using var payload = PayloadArchive.Open(setup);
+            if (payload.ReadManifest().ToolkitFingerprint != "toolkit") throw new Exception("The manifest did not round-trip.");
+            var single = Path.Combine(root, "single", "vcruntime140.dll");
+            payload.ExtractEntry("Toolkit/Ninja/vcruntime140.dll", single);
+            if (File.ReadAllText(single) != "runtime dll") throw new Exception("A linked entry did not extract on its own.");
+            var tools = Path.Combine(root, "tools");
+            payload.ExtractDirectory("Toolkit/CMake", tools);
+            if (File.ReadAllText(Path.Combine(tools, "bin", "vcruntime140.dll")) != "runtime dll")
+                throw new Exception("A link whose target lies outside the extracted directory was not resolved.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// The decoder reads what xz itself writes (x86 BCJ + LZMA2 preset 9e, CRC64, made with xz 5.8.3) and rejects
+    /// the same file with one byte changed.
+    /// </summary>
+    private static void TestXzDecoder()
+    {
+        var compressed = Convert.FromBase64String(XzFixture);
+        string Decode(byte[] bytes)
+        {
+            using var xz = new XzDecoderStream(new MemoryStream(bytes));
+            using var output = new MemoryStream();
+            xz.CopyTo(output);
+            return Convert.ToHexStringLower(SHA256.HashData(output.ToArray()));
+        }
+
+        var hash = Decode(compressed);
+        if (hash != "c36eab388c943c45dd4b40088112e2015100290e83f10388192db179a63a23db")
+            throw new Exception($"The xz fixture decoded to {hash}.");
+        foreach (var position in new[] { 40, compressed.Length / 2, compressed.Length - 30 })
+        {
+            var damaged = (byte[])compressed.Clone();
+            damaged[position] ^= 0x20;
+            try
+            {
+                Decode(damaged);
+                throw new Exception($"A damaged xz file (byte {position}) was accepted.");
+            }
+            catch (InvalidDataException) { }
+        }
+        try
+        {
+            Decode(compressed[..^20]);
+            throw new Exception("A truncated xz file was accepted.");
+        }
+        catch (InvalidDataException) { }
+    }
+
+    private const string XzFixture =
+        "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";
 
     private static void TestWorkspaceTimestampReconciliation()
     {

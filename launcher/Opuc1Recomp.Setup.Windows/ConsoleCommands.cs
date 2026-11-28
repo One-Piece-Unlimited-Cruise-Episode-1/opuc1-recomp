@@ -35,6 +35,38 @@ internal static class ConsoleCommands
         return 0;
     }
 
+    /// <summary>
+    /// <c>--pack-payload --payload-root DIR --xz XZ --output FILE</c>: the release payload that Build-Installer.ps1
+    /// appends to this host (see <see cref="PayloadArchive"/>). Prints one line per part.
+    /// </summary>
+    public static int PackPayload(CommandLine command)
+    {
+        var root = Path.GetFullPath(command.PayloadRootPath!);
+        var output = Path.GetFullPath(command.OutputPath!);
+        var work = output + ".parts";
+        var reports = PayloadPacker.Pack(root, output, work, PayloadPacker.XzCompressor(command.XzPath!));
+        if (Directory.Exists(work)) Directory.Delete(work, recursive: true);
+        foreach (var part in reports)
+            Console.Out.WriteLine($"{part.Name}: {part.Files} files + {part.Links} copies stored once " +
+                                  $"({part.LinkedBytes / 1048576.0:F1} MiB), tar {part.TarBytes / 1048576.0:F1} MiB -> " +
+                                  $"xz {part.CompressedBytes / 1048576.0:F1} MiB");
+        return 0;
+    }
+
+    /// <summary>
+    /// <c>--verify-payload --payload-root DIR</c>, run on a finished setup: unpacks its own payload the way an
+    /// installation does and fails unless that reproduces the staged tree byte for byte.
+    /// </summary>
+    public static int VerifyPayload(CommandLine command)
+    {
+        var setup = Environment.ProcessPath ?? throw new InvalidOperationException("Cannot locate the setup executable.");
+        var scratch = Path.Combine(Path.GetTempPath(), "opuc1-recomp-verify-payload-" + Guid.NewGuid().ToString("N"));
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var count = PayloadPacker.Verify(setup, command.PayloadRootPath!, scratch);
+        Console.Out.WriteLine($"The payload reproduces all {count} staged files ({started.Elapsed.TotalSeconds:F0} s).");
+        return 0;
+    }
+
     public static int EmitPayloadIdentities(CommandLine command)
     {
         var root = Path.GetFullPath(command.PayloadRootPath!);

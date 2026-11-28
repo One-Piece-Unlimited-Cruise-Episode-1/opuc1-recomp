@@ -14,7 +14,9 @@ internal enum AppMode
     CheckProducts,
     RepairProducts,
     Version,
-    EmitPayloadIdentities
+    EmitPayloadIdentities,
+    PackPayload,
+    VerifyPayload
 }
 
 /// <summary>
@@ -31,6 +33,8 @@ internal sealed record ModeRules
     public bool AcceptsInstallDirectory { get; init; }
     public bool RequiresInstallDirectory { get; init; }
     public bool RequiresPayloadRoot { get; init; }
+    public bool RequiresXz { get; init; }
+    public bool RequiresOutput { get; init; }
     public bool AcceptsPortable { get; init; }
 }
 
@@ -43,6 +47,8 @@ internal sealed class CommandLine
     public bool Quiet { get; private set; }
     public bool ProgressJson { get; private set; }
     public string? PayloadRootPath { get; private set; }
+    public string? XzPath { get; private set; }
+    public string? OutputPath { get; private set; }
     public bool Portable { get; private set; }
 
     public static bool WantsProgressJson(string[] args) =>
@@ -74,6 +80,10 @@ internal sealed class CommandLine
                 case "--portable": result.Portable = true; break;
                 case "--emit-payload-identities": result.Mode = AppMode.EmitPayloadIdentities; break;
                 case "--payload-root": result.PayloadRootPath = RequireValue(args, ref i); break;
+                case "--pack-payload": result.Mode = AppMode.PackPayload; break;
+                case "--verify-payload": result.Mode = AppMode.VerifyPayload; break;
+                case "--xz": result.XzPath = RequireValue(args, ref i); break;
+                case "--output": result.OutputPath = RequireValue(args, ref i); break;
                 case "--quiet": result.Quiet = true; break;
                 case "--progress-json": result.ProgressJson = true; break;
                 case "--game": result.GamePath = RequireValue(args, ref i); break;
@@ -125,7 +135,12 @@ internal sealed class CommandLine
         [AppMode.EmitPayloadIdentities] = new ModeRules
         {
             Flag = "--emit-payload-identities", RequiresPayloadRoot = true
-        }
+        },
+        [AppMode.PackPayload] = new ModeRules
+        {
+            Flag = "--pack-payload", RequiresPayloadRoot = true, RequiresXz = true, RequiresOutput = true
+        },
+        [AppMode.VerifyPayload] = new ModeRules { Flag = "--verify-payload", RequiresPayloadRoot = true }
     };
 
     private void Validate()
@@ -143,11 +158,17 @@ internal sealed class CommandLine
         Reject(ProgressJson && !rules.AcceptsProgressJson, "--progress-json");
         Reject(PayloadRootPath is not null && !rules.RequiresPayloadRoot, "--payload-root");
         Reject(Portable && !rules.AcceptsPortable, "--portable");
+        Reject(XzPath is not null && !rules.RequiresXz, "--xz");
+        Reject(OutputPath is not null && !rules.RequiresOutput, "--output");
 
         if (rules.RequiresGame && string.IsNullOrWhiteSpace(GamePath))
             throw new ArgumentException("--game is required.");
         if (rules.RequiresPayloadRoot && string.IsNullOrWhiteSpace(PayloadRootPath))
             throw new ArgumentException($"--payload-root is required with {rules.Flag}.");
+        if (rules.RequiresXz && string.IsNullOrWhiteSpace(XzPath))
+            throw new ArgumentException($"--xz is required with {rules.Flag}.");
+        if (rules.RequiresOutput && string.IsNullOrWhiteSpace(OutputPath))
+            throw new ArgumentException($"--output is required with {rules.Flag}.");
 
         // A portable installation has no default location so the caller must state where that root is.
         if (Portable && string.IsNullOrWhiteSpace(InstallDirectory))

@@ -215,6 +215,12 @@ function Copy-Harvested([string]$SourcePath, [string]$SubDirectory) {
         throw "Two harvested files collide on the name ${name}: $SourcePath"
     }
     Copy-Item -LiteralPath $SourcePath -Destination $destination
+    if ($SubDirectory -eq 'bin' -and $name -like '*.dll') {
+        # The runtime DLLs (SDL3, libpng, zlib) are copied beside every game build; their DWARF debug
+        # sections serve no one there. Stripped before the Contents hashes below are taken.
+        & (Join-Path $toolchainBin 'llvm-strip.exe') --strip-debug $destination
+        if ($LASTEXITCODE -ne 0) { throw "llvm-strip failed on $destination (exit $LASTEXITCODE)." }
+    }
     $copiedFiles.Add("$SubDirectory/$name")
     return "$SubDirectory/$name"
 }
@@ -418,6 +424,8 @@ $provenance = [ordered]@{
     RuntimeCpuProfile = $meta['runtime_cpu_profile']
     Sdl3Target = $meta['aurora_sdl3_target']
     HarvestedLibraryCount = @($linkerFileToReference.Keys).Count
+    # Build-Installer.ps1 re-harvests a package whose runtime DLLs still carry debug sections.
+    RuntimeDllsDebugStripped = $true
     Contents = $contents
 }
 $provenance | ConvertTo-Json -Depth 6 |

@@ -42,6 +42,10 @@ internal static class Program
                     return ConsoleCommands.VerifyInputs(command);
                 case AppMode.EmitPayloadIdentities:
                     return ConsoleCommands.EmitPayloadIdentities(command);
+                case AppMode.PackPayload:
+                    return ConsoleCommands.PackPayload(command);
+                case AppMode.VerifyPayload:
+                    return ConsoleCommands.VerifyPayload(command);
                 case AppMode.CheckProducts:
                 {
                     using var cancellationSignal = CancellationSignal.ObserveEnvironment();

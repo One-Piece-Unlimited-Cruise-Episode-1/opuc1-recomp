@@ -4,12 +4,16 @@ param(
     [string]$PortableToolsDirectory = 'launcher/artifacts/portable-tools',
     [string]$DependencySourceDirectory = 'launcher/artifacts/dependencies',
     [string]$VcRuntimeDirectory,
-    [string]$ToolkitReleaseTag = $env:GITHUB_REF_NAME
+    [string]$ToolkitReleaseTag = $env:GITHUB_REF_NAME,
+    # xz (XZ Utils 5.2 or newer) for the payload compression. Defaults to xz on PATH, then the copy Git for
+    # Windows ships (present on GitHub's windows runners). The setup decodes it itself (XzDecoderStream).
+    [string]$XzPath
 )
 
 # Produces launcher/dist/opuc1-recomp-setup.exe: the setup host with the game-code-free payload
 # (bundled translator, LLVM-MinGW, CMake, Ninja, nodtool, the runtime and aurora sources, the pinned
-# dependency sources and the precompiled aurora/runtime package) appended behind an OPUCPAY1 trailer.
+# dependency sources and the precompiled aurora/runtime package) appended behind an OPUCPAY2 trailer.
+# The payload is xz-compressed tar parts with repeated files stored once (PayloadArchive.cs).
 # The user's own disc is translated and compiled on their machine; nothing game-derived ships.
 # The host and the translator are Native AOT executables (their csproj files set PublishAot). The
 # payload carries no second copy of the host: an installation writes the release file's leading
@@ -107,13 +111,22 @@ function Copy-Directory([string]$Source, [string]$Destination) {
         }
     }
 }
-function Compress-Zip([string]$Source, [string]$Destination, [string[]]$Entries) {
-    $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    Assert-File $tar 'Windows archive tool'
-    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
-    & $tar -a -c -f $Destination -C $Source @Entries
-    if ($LASTEXITCODE -ne 0) { throw "ZIP creation failed with exit code $LASTEXITCODE." }
-    Assert-File $Destination 'ZIP output'
+function Resolve-Xz([string]$RequestedPath) {
+    if ($RequestedPath) {
+        $resolved = [IO.Path]::GetFullPath($RequestedPath)
+        Assert-File $resolved 'xz'
+        return $resolved
+    }
+    $onPath = Get-Command 'xz.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($onPath) { return $onPath.Source }
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA 'Programs'))) {
+        if (-not $root) { continue }
+        foreach ($relative in @('Git\usr\bin\xz.exe', 'Git\mingw64\bin\xz.exe')) {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
+    throw 'xz was not found; install Git for Windows or XZ Utils, or pass -XzPath.'
 }
 
 Assert-File $setupProject '.NET setup project'
@@ -175,7 +188,10 @@ function Test-NativePrebuiltCurrent([string]$PackageDirectory) {
     # The precompiled runtime archive must be from these runtime sources; a package without one
     # would make every installation compile the runtime itself.
     $recordedRuntime = $provenance.PSObject.Properties['RuntimeSourceFingerprint']
+    # Packages harvested before the runtime DLLs were stripped would ship their debug sections.
+    $recordedStripped = $provenance.PSObject.Properties['RuntimeDllsDebugStripped']
     return ($provenance.CompilerSha256 -eq $portableClangHash) -and
+           ($null -ne $recordedStripped) -and ($recordedStripped.Value -eq $true) -and
            ($provenance.FlagFingerprint -eq (Get-OpucNativeFlagFingerprint)) -and
            ($null -ne $recordedDawn) -and
            ($recordedDawn.Value -eq (Get-OpucDawnRuntimeSha256 $dependencySources)) -and
@@ -198,6 +214,8 @@ if (-not (Test-NativePrebuiltCurrent $nativePrebuiltPackage)) {
 }
 foreach ($name in $requiredDependencies) { Assert-Directory (Join-Path $dependencySources $name) "Pinned dependency $name" }
 $vcRuntime = Resolve-VcRuntimeDirectory $VcRuntimeDirectory
+$xz = Resolve-Xz $XzPath
+Write-Host "Payload compressor: $xz ($((& $xz --version | Select-Object -First 1)))"
 
 Reset-Directory $workRoot
 Reset-OutputDirectory $outputRoot
@@ -233,6 +251,7 @@ Copy-Directory (Join-Path $portableTools 'llvm-mingw') (Join-Path $toolkit 'llvm
 Copy-Directory (Join-Path $portableTools 'CMake') (Join-Path $toolkit 'CMake')
 Copy-Directory (Join-Path $portableTools 'Ninja') (Join-Path $toolkit 'Ninja')
 Remove-OpucUnusedToolkitFiles $toolkit
+Remove-OpucDebugSections $toolkit
 [IO.Directory]::CreateDirectory((Join-Path $toolkit 'Translator')) | Out-Null
 Copy-Item -LiteralPath $translator -Destination (Join-Path $toolkit 'Translator\Translator.Cli.exe')
 Copy-Item -LiteralPath $nodTool -Destination (Join-Path $toolkit 'nodtool.exe')
@@ -268,6 +287,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'NativeBuildFlags.ps1') -Destina
 [IO.Directory]::CreateDirectory((Join-Path $workspace 'Dependencies')) | Out-Null
 foreach ($name in $requiredDependencies) { Copy-Directory (Join-Path $dependencySources $name) (Join-Path $workspace "Dependencies\$name") }
 Remove-OpucUnusedDependencyFiles (Join-Path $workspace 'Dependencies')
+Remove-OpucDependencySources (Join-Path $workspace 'Dependencies')
 
 # The translation identity covers the runtime's native registrations through this index (see
 # ToolkitFingerprint), so it is extracted from exactly the staged runtime sources.
@@ -302,6 +322,28 @@ if ($LASTEXITCODE -ne 0) {
     throw "Windows PowerShell rejects the staged precompiled aurora package (exit $LASTEXITCODE); every installation would build aurora from source."
 }
 Remove-Item -LiteralPath $prebuiltGate -Force
+
+# What a game build reads from the MinGW headers and libraries is traced on this payload (its own
+# translator, toolkit, headers-only Dependencies and precompiled package, a synthetic DOL), the
+# toolkit is cut down to that, and the same build must then still link the product on the result.
+# Both CPU profiles: v2 compiles the runtime itself, v3 links the precompiled runtime archive.
+Write-Host 'Tracing which toolkit files a game build reads, then building again on the cut-down toolkit...'
+$payloadBuilds = Join-Path $workRoot 'payload-build'
+$traces = [Collections.Generic.List[string]]::new()
+foreach ($cpuProfile in @('v3', 'v2')) {
+    $trace = Join-Path $payloadBuilds "trace-$cpuProfile.txt"
+    & (Join-Path $PSScriptRoot 'Test-PayloadBuild.ps1') -PayloadRoot $payloadRoot `
+        -StageDirectory (Join-Path $payloadBuilds "trace-$cpuProfile") -X86CpuProfile $cpuProfile -TraceOutput $trace |
+        Out-Host
+    $traces.Add($trace)
+}
+Remove-OpucUntracedToolkitFiles $toolkit $traces.ToArray()
+foreach ($cpuProfile in @('v3', 'v2')) {
+    & (Join-Path $PSScriptRoot 'Test-PayloadBuild.ps1') -PayloadRoot $payloadRoot `
+        -StageDirectory (Join-Path $payloadBuilds "gate-$cpuProfile") -X86CpuProfile $cpuProfile | Out-Host
+    Assert-OpucSameBuildConfiguration (Join-Path $payloadBuilds "trace-$cpuProfile") (Join-Path $payloadBuilds "gate-$cpuProfile")
+}
+Remove-Item -LiteralPath $payloadBuilds -Recurse -Force
 
 Write-Host '[3/6] Writing manifests and third-party license inventory...'
 [IO.Directory]::CreateDirectory((Join-Path $payloadRoot 'licenses')) | Out-Null
@@ -383,10 +425,13 @@ Write-Host '[4/6] Enforcing the copyright and generated-code boundary...'
 & (Join-Path $PSScriptRoot 'Test-NativeDependencies.ps1') -PayloadRoot $payloadRoot -SetupHost $setupHost `
     -LlvmReadobjPath (Join-Path $portableTools 'llvm-mingw\bin\llvm-readobj.exe')
 
-Write-Host '[5/6] Creating the canonical installer payload...'
-$payloadZip = Join-Path $workRoot 'payload.zip'
-Compress-Zip $payloadRoot $payloadZip @(
-    'Toolkit','BuildWorkspace','licenses','payload-manifest.json')
+Write-Host '[5/6] Packing the installer payload (xz, repeated files stored once)...'
+# The setup host writes the format it reads (PayloadPacker / PayloadArchive), so packer and reader
+# cannot drift apart.
+$payloadFile = Join-Path $workRoot 'payload.bin'
+& $setupHost --pack-payload --payload-root $payloadRoot --xz $xz --output $payloadFile
+if ($LASTEXITCODE -ne 0) { throw "Payload packing failed with exit code $LASTEXITCODE." }
+Assert-File $payloadFile 'Packed payload'
 
 Write-Host '[6/6] Producing the single-file setup executable...'
 $outputSetup = Join-Path $outputRoot $setupName
@@ -394,16 +439,21 @@ Copy-Item $setupHost $outputSetup -Force
 $outputStream = [IO.File]::Open($outputSetup, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None)
 try {
     $offset = $outputStream.Position
-    $input = [IO.File]::OpenRead($payloadZip)
+    $input = [IO.File]::OpenRead($payloadFile)
     try { $input.CopyTo($outputStream) } finally { $input.Dispose() }
     $length = $outputStream.Position - $offset
     $writer = [IO.BinaryWriter]::new($outputStream, [Text.Encoding]::ASCII, $true)
     try {
-        $writer.Write([Text.Encoding]::ASCII.GetBytes('OPUCPAY1'))
+        $writer.Write([Text.Encoding]::ASCII.GetBytes('OPUCPAY2'))
         $writer.Write([Int64]$offset)
         $writer.Write([Int64]$length)
     } finally { $writer.Dispose() }
 } finally { $outputStream.Dispose() }
+
+# The release file unpacks itself the way an installation does and must give back the staged tree
+# byte for byte; a packer, decoder or link bug fails the release here instead of on a user's machine.
+& $outputSetup --verify-payload --payload-root $payloadRoot
+if ($LASTEXITCODE -ne 0) { throw "The finished setup does not reproduce its payload (exit $LASTEXITCODE)." }
 
 $setupItem = Get-Item -LiteralPath $outputSetup
 Write-Host ("{0}: {1} MiB; SHA-256 {2}" -f $setupItem.Name,

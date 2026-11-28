@@ -315,5 +315,11 @@ echo "Packaging..."
 # appimagetool detects the target architecture from the first ELF executable it finds in the
 # AppDir; AppRun here is a shell script, not ELF, so ARCH must be set explicitly.
 output_name="opuc1-recomp-setup-$appimagetool_arch.AppImage"
-ARCH="$appimagetool_arch" "$appimagetool" "$appdir" "$output_dir/$output_name"
+# appimagetool's zstd default leaves mksquashfs at its default level (15) with 128 KiB blocks; the
+# highest level (22) only makes packing slower, not unpacking, so the read path keeps its speed.
+# Block size and codec stay appimagetool's: larger blocks slow AppImage start-up, and the embedded
+# type2 runtime is built for zstd.
+ARCH="$appimagetool_arch" "$appimagetool" --comp zstd \
+    --mksquashfs-opt -Xcompression-level --mksquashfs-opt 22 \
+    "$appdir" "$output_dir/$output_name"
 echo "Built: $output_dir/$output_name"
