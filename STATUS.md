@@ -198,6 +198,13 @@ combat, enemies, field objects, menus past the + banner, parity with Dolphin.
   0x9142A240; the pointer check accepted only MEM1), so RMB was a shake there. `GameUi` now accepts MEM2 and counts
   CharaManager +0x30C ≠ 0 as a menu. Checked by script: hub → Storage → RMB → hub → RMB → deck. Not checked: Sunny
   room-object pages (Kitchen, Fish Tank...) one by one; they open through the same +0x30C.
+- Wii Remote battery (2026-11-28, `hle/opuc/wpad_info_opuc.cpp`): `WPADGetInfoAsync` 802c3438 never completed with
+  no remote under the translated WPAD, `ALPadWii.aInfo` stayed zeroed (battery 0) and `BatteryWarningWii::Update`
+  80252a44 opened the low-battery badge after six 10-s checks (~62.6 s into AdventureMain; vault pad-input). Channel 0
+  now answers at once: battery 4, lowBat 0, attach 1, led 1. `OPUC_WPAD_INFO_PASSTHROUGH=1` restores the old path;
+  `OPUC_TRACE_INPUT=1` logs each badge open (trace wrapper on `AquaDesignerBatteryIcon::Open` 8019e120, a vtable
+  target: a new native there needs `-Stage translate`). A/B by script on the Sunny deck, 200 s: badge at t ≈ 87 s
+  without the override, none with it (build/logs/battery-ab/). Not checked: the HOME Menu's battery bars.
 - PC button art (2026-11-26, ported from the Play tab's play/ui/pcart.js; not in the game; `[game] pc_button_art`,
   F10 > Game): the 48 pictures that show a Wii Remote / Nunchuk button (tutorial reminders 0xA00050–56 and the
   `[icon:k]` pictures, the window A prompt 0xA00000 / 01, the check bubbles 0xA00490 / 93 / 94 / 95, the PauseMenu,
